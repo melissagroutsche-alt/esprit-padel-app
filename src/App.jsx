@@ -4,6 +4,13 @@ import { getFirestore, doc as fbDoc, setDoc, onSnapshot, getDoc as fbGetDoc } fr
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 import { getMessaging, getToken, onMessage } from "firebase/messaging";
 import TaskPlanningWorkspace from "./TaskPlanningWorkspace";
+import { useAuth } from "./auth/AuthContext";
+import { loginUser, logoutUser, resetPassword } from "./auth/authService";
+
+// ── Feature flag — Phase 2.1 ───────────────────────────────────────────────
+// true  → Firebase Auth actif (staging develop)
+// false → ancien système (rollback immédiat)
+const USE_FIREBASE_AUTH = true;
 
 // Firebase init
 let _fb_db = null;
@@ -166,6 +173,9 @@ function useSyncState(key, initialValue) {
   });
   const skipNext = useRef(false);
   const unsubRef = useRef(null);
+  // Positionné à true dès que le premier snapshot Firestore est reçu (document vide ou non).
+  // Exposé en 3e élément du tuple pour permettre un suivi explicite sans compter les renders.
+  const [snapshotReady, setSnapshotReady] = useState(false);
 
   // Attach Firebase listener - with retry
   const attachListener = useCallback(() => {
@@ -182,6 +192,8 @@ function useSyncState(key, initialValue) {
           }
           skipNext.current = false;
         }
+        // Marquer ready dans tous les cas (document existant ou non)
+        setSnapshotReady(true);
       });
       return true;
     } catch { return false; }
@@ -236,7 +248,7 @@ function useSyncState(key, initialValue) {
     });
   }, [key]);
 
-  return [value, setSyncValue];
+  return [value, setSyncValue, snapshotReady];
 }
 
 function useFirestoreValue(key, initialValue = null) {
@@ -7227,13 +7239,23 @@ export default function EspritPadelCommunication() {
     return <PublicSurveyPage surveyId={surveyUrlId} />;
   }
 
-  const [loggedIn, setLoggedIn] = useState(() => { try { return localStorage.getItem("ep_loggedIn") === "true"; } catch { return false; } });
-  const [currentUserId, setCurrentUserId] = useState(() => { try { return localStorage.getItem("ep_userId") || null; } catch { return null; } });
+  // ── Firebase Auth (Phase 2.1) — hook toujours appelé, flag contrôle l'usage ──
+  const { firebaseUser, appId: fbAppId, authLoading } = useAuth();
+
+  const [loggedIn, setLoggedIn] = useState(() => {
+    if (USE_FIREBASE_AUTH) return false; // Firebase gère la session — pas de restauration localStorage
+    try { return localStorage.getItem("ep_loggedIn") === "true"; } catch { return false; }
+  });
+  const [currentUserId, setCurrentUserId] = useState(() => {
+    if (USE_FIREBASE_AUTH) return null;
+    try { return localStorage.getItem("ep_userId") || null; } catch { return null; }
+  });
   const [loginEmail, setLoginEmail] = useState(() => { try { return localStorage.getItem("ep_rememberEmail") || ""; } catch { return ""; } });
   const [loginPassword, setLoginPassword] = useState("");
   const [loginError, setLoginError] = useState("");
   const [loginLoading, setLoginLoading] = useState(false);
   const [loginForgot, setLoginForgot] = useState(false);
+  const [loginForgotSent, setLoginForgotSent] = useState(false);
   const [rememberMe, setRememberMe] = useState(() => { try { return localStorage.getItem("ep_remember") === "true"; } catch { return false; } });
 
   const [page, setPage] = useState("dashboard");
@@ -7262,7 +7284,7 @@ export default function EspritPadelCommunication() {
   }, []);
   // ===== SYNCED SHARED DATA =====
   const [clubs, setClubs] = useSyncState("ep:clubs", INITIAL_CLUBS);
-  const [users, setUsers] = useSyncState("ep:users", initialUsers);
+  const [users, setUsers, usersFirestoreReady] = useSyncState("ep:users", initialUsers);
   const [objectives, setObjectives] = useSyncState("ep:objectives", initialObjectives);
   const [tasks, setTasks] = useSyncState("ep:tasks", initialTasks);
   const [requests, setRequests] = useSyncState("ep:requests", []);
@@ -7724,13 +7746,112 @@ export default function EspritPadelCommunication() {
   const usersRef = useRef(users);
   useEffect(() => { usersRef.current = users; }, [users]);
 
-  const handleLogin = (e) => {
+  // ── Synchronisation Firebase Auth → état applicatif — 5 états explicites ──
+  // usersFirestoreReady provient directement de useSyncState (3e élément du tuple) :
+  // il passe à true dès que le premier callback onSnapshot Firestore s'exécute,
+  // sans compter les renders ni dépendre du StrictMode ou du fallback window.storage.
+  useEffect(() => {
+    if (!USE_FIREBASE_AUTH) return;
+    // État 1 : Firebase Auth encore en cours d'initialisation
+    if (authLoading) return;
+
+    // Pas de session Firebase
+    if (!firebaseUser) {
+      setLoggedIn(false);
+      setCurrentUserId(null);
+      return;
+    }
+
+    // État 4 : authentifié mais aucun Custom Claim appId
+    if (fbAppId == null) {
+      logoutUser().catch(() => {});
+      setLoggedIn(false);
+      setCurrentUserId(null);
+      setLoginError("Compte non configuré. Contactez l'administrateur.");
+      setLoginLoading(false);
+      return;
+    }
+
+    // État 2 : Firebase prête, session restaurée, mais ep:users pas encore chargé depuis Firestore
+    if (!usersFirestoreReady) return;
+
+    // États 3 & 5 : Firebase + données métier disponibles → résoudre l'utilisateur
+    const bizUser = users.find(u => String(u.id) === String(fbAppId));
+    if (bizUser) {
+      // État 3 : tout est prêt, correspondance trouvée
+      setCurrentUserId(bizUser.id);
+      CURRENT_USER_ID = bizUser.id;
+      setLoggedIn(true);
+      setLoginLoading(false);
+      setLoginError("");
+    } else {
+      // État 5 : Firestore chargé mais aucun utilisateur métier correspondant à l'appId
+      logoutUser().catch(() => {});
+      setLoggedIn(false);
+      setCurrentUserId(null);
+      setLoginError("Compte non reconnu dans l'application. Contactez l'administrateur.");
+      setLoginLoading(false);
+    }
+  }, [firebaseUser, fbAppId, authLoading, usersFirestoreReady, users]);
+
+  const handleForgotPassword = async () => {
+    if (USE_FIREBASE_AUTH) {
+      if (!loginEmail || !loginEmail.includes("@")) {
+        setLoginError("Saisissez votre adresse email ci-dessus puis cliquez sur Mot de passe oublié.");
+        return;
+      }
+      try {
+        await resetPassword(loginEmail, "https://espritpadelcom.netlify.app");
+        setLoginForgotSent(true);
+        setLoginForgot(false);
+        setLoginError("");
+      } catch (err) {
+        if (err.code === "auth/user-not-found" || err.code === "auth/invalid-email") {
+          setLoginForgotSent(true); // Ne pas révéler si l'email existe
+        } else {
+          setLoginError("Impossible d'envoyer l'email. Réessayez dans quelques instants.");
+        }
+      }
+      return;
+    }
+    setLoginForgot(true);
+  };
+
+  const handleLogin = async (e) => {
     e.preventDefault();
     setLoginError("");
+    setLoginForgotSent(false);
     if (!loginEmail || !loginPassword) { setLoginError("Veuillez remplir tous les champs"); return; }
     if (!loginEmail.includes("@")) { setLoginError("Adresse email invalide"); return; }
     setLoginLoading(true);
 
+    // ── Firebase Auth ────────────────────────────────────────────────────────
+    if (USE_FIREBASE_AUTH) {
+      try {
+        await loginUser(loginEmail, loginPassword, rememberMe);
+        // onAuthStateChanged → useEffect de synchronisation prend le relais
+        // setLoggedIn/setCurrentUserId sont gérés par l'effect, pas ici
+        try {
+          if (rememberMe) {
+            localStorage.setItem("ep_rememberEmail", loginEmail);
+            localStorage.setItem("ep_remember", "true");
+          } else {
+            localStorage.removeItem("ep_rememberEmail");
+            localStorage.removeItem("ep_remember");
+          }
+        } catch {}
+      } catch (err) {
+        let msg = "Email ou mot de passe incorrect";
+        if (err.code === "auth/too-many-requests") msg = "Trop de tentatives. Réessayez dans quelques minutes.";
+        else if (err.code === "auth/user-disabled") msg = "Ce compte est désactivé. Contactez l'administrateur.";
+        else if (err.code === "auth/network-request-failed") msg = "Erreur réseau. Vérifiez votre connexion.";
+        setLoginError(msg);
+        setLoginLoading(false);
+      }
+      return;
+    }
+
+    // ── Ancien système (USE_FIREBASE_AUTH = false) ───────────────────────────
     const doLogin = (userList) => {
       const user = userList.find(u => u.email && u.email.toLowerCase() === loginEmail.toLowerCase().trim() && u.password === loginPassword);
       if (user) {
@@ -7939,6 +8060,20 @@ ${guestForm.description || "(Aucune description)"}
     setGuestLoading(false);
   };
 
+  // ── Écran de chargement Firebase (évite le flash login → app) ──────────────
+  // Couvre État 1 (authLoading) ET État 2 (session active, ep:users pas encore chargé)
+  if (USE_FIREBASE_AUTH && (authLoading || (firebaseUser != null && !usersFirestoreReady))) {
+    return (
+      <div style={{ height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#2D2D30", fontFamily: "'Montserrat', sans-serif" }}>
+        <div style={{ textAlign: "center" }}>
+          <div style={{ width: 36, height: 36, border: "3px solid rgba(255,255,255,0.15)", borderTopColor: "#FEB601", borderRadius: "50%", animation: "spin 0.8s linear infinite", margin: "0 auto 14px" }} />
+          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.4)" }}>Connexion en cours…</div>
+        </div>
+      </div>
+    );
+  }
+
   if (!loggedIn) {
     // GUEST FORM
     if (guestMode) {
@@ -8077,14 +8212,21 @@ ${guestForm.description || "(Aucune description)"}
                   <input type="checkbox" checked={rememberMe} onChange={e => setRememberMe(e.target.checked)} style={{ accentColor: "#0F56B8" }} />
                   <span style={{ fontSize: 11, color: "#6B7280" }}>Se souvenir de moi</span>
                 </label>
-                <span onClick={() => setLoginForgot(true)} style={{ fontSize: 11, color: "#0F56B8", cursor: "pointer", fontWeight: 600 }}>Mot de passe oublié ?</span>
+                <span onClick={handleForgotPassword} style={{ fontSize: 11, color: "#0F56B8", cursor: "pointer", fontWeight: 600 }}>Mot de passe oublié ?</span>
               </div>
 
-              {loginForgot && (
+              {loginForgot && !USE_FIREBASE_AUTH && (
                 <div style={{ padding: "10px 14px", borderRadius: 8, background: "#0F56B810", border: "1px solid #0F56B830", marginBottom: 14, display: "flex", alignItems: "center", gap: 8 }}>
                   <span style={{ fontSize: 16 }}>📩</span>
                   <div><div style={{ fontSize: 12, fontWeight: 600, color: "#0F56B8" }}>Contactez votre administrateur</div><div style={{ fontSize: 10, color: "#6B7280", marginTop: 2 }}>melissa@espritpadel.com</div></div>
                   <button onClick={() => setLoginForgot(false)} style={{ marginLeft: "auto", background: "none", border: "none", cursor: "pointer", color: "#6B7280", fontSize: 12 }}>✕</button>
+                </div>
+              )}
+              {loginForgotSent && USE_FIREBASE_AUTH && (
+                <div style={{ padding: "10px 14px", borderRadius: 8, background: "#10B98110", border: "1px solid #10B98130", marginBottom: 14, display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 16 }}>✅</span>
+                  <div><div style={{ fontSize: 12, fontWeight: 600, color: "#10B981" }}>Email envoyé</div><div style={{ fontSize: 10, color: "#6B7280", marginTop: 2 }}>Vérifiez votre boîte mail pour réinitialiser votre mot de passe.</div></div>
+                  <button onClick={() => setLoginForgotSent(false)} style={{ marginLeft: "auto", background: "none", border: "none", cursor: "pointer", color: "#6B7280", fontSize: 12 }}>✕</button>
                 </div>
               )}
 
@@ -8167,7 +8309,15 @@ ${guestForm.description || "(Aucune description)"}
             <Avatar name={`${currentUser.firstName} ${currentUser.lastName}`} size={32} color="#6366F1" />
             {sidebarOpen && <div style={{ flex: 1 }}><div style={{ fontSize: 12, fontWeight: 600, color: "#2D2D30" }}>{currentUser.firstName} {currentUser.lastName}</div><div style={{ fontSize: 10, color: "#94A3B8" }}>{currentUser.role}</div></div>}
           </div>
-          {sidebarOpen && <button onClick={() => { setLoggedIn(false); setLoginPassword(""); try { localStorage.removeItem("ep_loggedIn"); localStorage.removeItem("ep_userId"); } catch {} }} style={{ width: "100%", padding: "5px 0", borderRadius: 6, border: "1px solid #FEE2E2", background: "#FEF2F2", color: "#EF4444", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>Déconnexion</button>}
+          {sidebarOpen && <button onClick={() => {
+            setLoginPassword("");
+            try { localStorage.removeItem("ep_loggedIn"); localStorage.removeItem("ep_userId"); } catch {}
+            if (USE_FIREBASE_AUTH) {
+              logoutUser().catch(() => {}); // onAuthStateChanged → useEffect → setLoggedIn(false)
+            } else {
+              setLoggedIn(false);
+            }
+          }} style={{ width: "100%", padding: "5px 0", borderRadius: 6, border: "1px solid #FEE2E2", background: "#FEF2F2", color: "#EF4444", fontSize: 11, fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>Déconnexion</button>}
         </div>
       </div>
 
