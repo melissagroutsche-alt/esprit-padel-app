@@ -1,0 +1,21 @@
+[build]
+  command = "npm run build"
+  publish = "build"
+
+# Branche principale = production
+[context.production]
+  command = "npm run build"
+
+# Branche develop = staging
+[context.develop]
+  command = "npm run build"
+
+# Toutes les autres branches = previews
+[context.branch-deploy]
+  command = "npm run build"
+
+# SPA : toutes les routes vers index.html
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
