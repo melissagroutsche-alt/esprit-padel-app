@@ -19,7 +19,7 @@
  *   - Ne déduit jamais un appId automatiquement — chaque ligne est explicite et contrôlable
  */
 
-const admin = require("firebase-admin");
+// firebase-admin est chargé dynamiquement uniquement en mode réel (pas en dry-run)
 const path = require("path");
 const readline = require("readline");
 
@@ -32,21 +32,13 @@ const readline = require("readline");
 //     depuis Firebase Console → Authentication → colonne "UID utilisateur".
 // ─────────────────────────────────────────────────────────────────────────────
 const USER_MAPPING = [
-  // {
-  //   email:     "melissa@espritpadel.com",   // email Firebase Auth
-  //   uid:       "FIREBASE_UID_ICI",          // UID copié depuis Firebase Console
-  //   appId:     1,                            // ID entier dans Firestore (appdata/ep:users)
-  //   displayName: "Mélissa Dupont",           // pour vérification visuelle uniquement
-  // },
-  //
-  // Ajouter une ligne par utilisateur créé dans Firebase Auth.
-  // Exemple avec un second utilisateur :
-  // {
-  //   email:     "autre@espritpadel.com",
-  //   uid:       "FIREBASE_UID_ICI",
-  //   appId:     2,
-  //   displayName: "Prénom Nom",
-  // },
+  {
+    email:       "melissa@espritpadel.com",
+    uid:         "9XH8zIo072SwzpHb4v3X4vtZ63w1",
+    appId:       1,
+    displayName: "Mélissa Dupont",
+  },
+  // Ajouter les autres utilisateurs ici au fur et à mesure de leur création Firebase Auth.
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -118,14 +110,31 @@ async function run() {
 
   printMapping(USER_MAPPING);
 
-  if (!DRY_RUN) {
-    const answer = await confirm(
-      `⚠️  Attribuer le Custom Claim appId à ${USER_MAPPING.length} utilisateur(s) Firebase Auth ? [oui/non] : `
-    );
-    if (answer !== "oui") {
-      console.log("\nAnnulé. Aucune modification effectuée.\n");
-      process.exit(0);
-    }
+  console.log("\nAction exacte que le script effectuerait :");
+  USER_MAPPING.forEach((u) => {
+    console.log(`  admin.auth().setCustomUserClaims("${u.uid}", { appId: ${u.appId} })`);
+  });
+
+  if (DRY_RUN) {
+    console.log("\n[DRY-RUN terminé — aucune modification Firebase Auth ni Firestore effectuée]\n");
+    return;
+  }
+
+  const answer = await confirm(
+    `\n⚠️  Attribuer le Custom Claim appId à ${USER_MAPPING.length} utilisateur(s) Firebase Auth ? [oui/non] : `
+  );
+  if (answer !== "oui") {
+    console.log("\nAnnulé. Aucune modification effectuée.\n");
+    process.exit(0);
+  }
+
+  // firebase-admin chargé uniquement ici, jamais en dry-run
+  let admin;
+  try {
+    admin = require("firebase-admin");
+  } catch {
+    console.error("\n❌  firebase-admin non installé. Exécuter : npm install firebase-admin\n");
+    process.exit(1);
   }
 
   let serviceAccount;
@@ -141,27 +150,18 @@ async function run() {
     admin.initializeApp({ credential: admin.credential.cert(serviceAccount) });
   }
 
-  console.log(DRY_RUN ? "\nSimulation :" : "\nApplication des Custom Claims :");
-
+  console.log("\nApplication des Custom Claims :");
   for (const user of USER_MAPPING) {
-    if (DRY_RUN) {
-      console.log(`  [DRY-RUN] ${user.email} (UID: ${user.uid}) → appId: ${user.appId}`);
-    } else {
-      try {
-        await admin.auth().setCustomUserClaims(user.uid, { appId: user.appId });
-        console.log(`  ✅  ${user.email} → appId: ${user.appId}`);
-      } catch (err) {
-        console.error(`  ❌  ${user.email} → ERREUR : ${err.message}`);
-      }
+    try {
+      await admin.auth().setCustomUserClaims(user.uid, { appId: user.appId });
+      console.log(`  ✅  ${user.email} → appId: ${user.appId}`);
+    } catch (err) {
+      console.error(`  ❌  ${user.email} → ERREUR : ${err.message}`);
     }
   }
 
-  if (!DRY_RUN) {
-    console.log("\nℹ️  Les utilisateurs doivent se reconnecter (ou forcer un refresh token)");
-    console.log("   pour que le nouveau Custom Claim soit pris en compte dans l'application.\n");
-  } else {
-    console.log("\n[DRY-RUN terminé — aucune modification effectuée]\n");
-  }
+  console.log("\nℹ️  Les utilisateurs doivent se reconnecter (ou forcer un refresh token)");
+  console.log("   pour que le nouveau Custom Claim soit pris en compte dans l'application.\n");
 }
 
 run().catch((err) => {
