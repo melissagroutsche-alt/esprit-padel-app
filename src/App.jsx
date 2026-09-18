@@ -39,7 +39,7 @@ const INITIAL_CLUBS = [];
 const DAYS = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi"];
 const URGENCY_COLORS = { Urgent: "#EF4444", Normal: "#F59E0B", Bas: "#6B7280" };
 const STATUS_TYPES = ["À faire", "En cours", "Terminé"];
-let CURRENT_USER_ID = 1;
+
 
 const DEFAULT_THEME = { primary: "#0F56B8", sidebar: "#2D2D30", sidebarText: "#F4F2EF", accent: "#FEB601", background: "#F4F2EF", cardBg: "#ffffff", textMain: "#2D2D30", textSecondary: "#6B7280" };
 
@@ -580,7 +580,7 @@ function Dashboard({ clubs, objectives, tasks, setTasks, meetings, slots, public
   const todayMeetings = myMeetings.filter(m => m.date === todayStr).map(m => ({ id: `m-${m.id}`, time: m.time || "00:00", duration: m.duration, activity: m.title, type: "Réunion", source: "meeting" }));
   const todayMyTasks = myTasks.filter(t => t.deadline === todayStr && t.status !== "Terminé");
   const urgentTasks = myTasks.filter(t => t.urgency === "Urgent" && t.status !== "Terminé");
-  const upcomingPubs = publications.filter(p => String(p.owner) === String(CURRENT_USER_ID) && p.date >= todayStr).slice(0, 4);
+  const upcomingPubs = publications.filter(p => String(p.owner) === String(currentUserId) && p.date >= todayStr).slice(0, 4);
   const [instaClub, setInstaClub] = useState(myClubs[0]?.id || 1);
   const clubPosts = instagramPosts.filter(p => p.club === instaClub);
 
@@ -1323,7 +1323,7 @@ function ProjectsPage({ clubs, users, projects, setProjects, tasks, setTasks, cu
   const sendChat = (pid) => {
     if (!chatInput.trim()) return;
     const proj = projects.find(p => String(p.id) === String(pid));
-    setProjects(pr => pr.map(p => String(p.id) === String(pid) ? { ...p, chat: [...(p.chat || []), { id: uid(), userId: CURRENT_USER_ID, text: chatInput.trim(), time: new Date().toLocaleString("fr-FR", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) }] } : p));
+    setProjects(pr => pr.map(p => String(p.id) === String(pid) ? { ...p, chat: [...(p.chat || []), { id: uid(), userId: currentUserId, text: chatInput.trim(), time: new Date().toLocaleString("fr-FR", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) }] } : p));
     if (proj && addToast) addToast({ title: `Message dans ${proj.name}`, icon: "💬", badges: [proj.name], target: "projects" });
     setChatInput("");
   };
@@ -1364,7 +1364,7 @@ function ProjectsPage({ clubs, users, projects, setProjects, tasks, setTasks, cu
       fileUrl: "",
       type: projDetectType(file.name),
       date: new Date().toISOString().split("T")[0],
-      owner: CURRENT_USER_ID,
+      owner: currentUserId,
     };
     setProjects(pr => pr.map(p => String(p.id) === String(pid) ? { ...p, files: [...(p.files || []), newFile] } : p));
     // Upload to Firebase Storage then update URL
@@ -1560,7 +1560,7 @@ function ProjectsPage({ clubs, users, projects, setProjects, tasks, setTasks, cu
                         <div style={{ display: "flex", gap: 4, flexShrink: 0 }}>
                           <Badge text={f.type} color="#475569" small />
                           {f.fileUrl && <a href={f.fileUrl} download={f.fileName} onClick={e => e.stopPropagation()} style={{ fontSize: 10, color: "#0F56B8", fontWeight: 600, textDecoration: "none", padding: "3px 8px", background: "#EFF6FF", borderRadius: 6 }}>⬇ Ouvrir</a>}
-                          {String(f.owner) === String(CURRENT_USER_ID) && <button onClick={() => delProjectFile(proj.id, f.id)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, color: "#EF4444" }}>🗑️</button>}
+                          {String(f.owner) === String(currentUserId) && <button onClick={() => delProjectFile(proj.id, f.id)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 12, color: "#EF4444" }}>🗑️</button>}
                         </div>
                       </div>
                     );
@@ -1606,7 +1606,7 @@ function ProjectsPage({ clubs, users, projects, setProjects, tasks, setTasks, cu
                 ) : (
                   (proj.chat || []).map(msg => {
                     const msgUser = users.find(u => String(u.id) === String(msg.userId));
-                    const isMe = msg.userId === CURRENT_USER_ID;
+                    const isMe = msg.userId === currentUserId;
                     return (
                       <div key={msg.id} style={{ display: "flex", flexDirection: isMe ? "row-reverse" : "row", gap: 8, alignItems: "flex-end" }}>
                         <Avatar name={msgUser ? `${msgUser.firstName} ${msgUser.lastName}` : "?"} size={28} color={["#6366F1","#EC4899","#10B981","#F59E0B"][msg.userId % 4]} />
@@ -2357,7 +2357,7 @@ tr:nth-child(even) td{background:#F4F2EF}
 }
 
 // ==================== EDITORIAL (CALENDAR VIEW + CRUD) ====================
-function EditorialPage({ clubs, publications, setPublications }) {
+function EditorialPage({ clubs, publications, setPublications, currentUserId }) {
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({ platform: "Instagram", type: "Post", title: "", status: "Brouillon", date: "", notes: "" });
@@ -2365,7 +2365,7 @@ function EditorialPage({ clubs, publications, setPublications }) {
   const [editorialTab, setEditorialTab] = useState("calendar");
 
   // Only show MY publications — no club dimension
-  const filtered = publications.filter(p => String(p.owner) === String(CURRENT_USER_ID));
+  const filtered = publications.filter(p => String(p.owner) === String(currentUserId));
   const statusColors = { "Publié": "#10B981", "Planifié": "#0F56B8", "Brouillon": "#F59E0B" };
   const typeIcons = { Post: "📷", Reel: "🎬", Story: "📱", Carrousel: "🖼️", Newsletter: "✉️" };
   const monthNames = ["Janvier","Février","Mars","Avril","Mai","Juin","Juillet","Août","Septembre","Octobre","Novembre","Décembre"];
@@ -2375,12 +2375,12 @@ function EditorialPage({ clubs, publications, setPublications }) {
   const save = () => {
     if (!form.title) return;
     if (editing) setPublications(p => p.map(x => String(x.id) === String(editing) ? { ...x, ...form } : x));
-    else setPublications(p => [...p, { id: uid(), ...form, owner: CURRENT_USER_ID }]);
+    else setPublications(p => [...p, { id: uid(), ...form, owner: currentUserId }]);
     setModalOpen(false);
   };
   const del = (id) => {
     const pub = publications.find(p => String(p.id) === String(id));
-    if (pub && String(pub.owner) !== String(CURRENT_USER_ID)) return;
+    if (pub && String(pub.owner) !== String(currentUserId)) return;
     setPublications(p => p.filter(x => String(x.id) !== String(id)));
   };
 
@@ -7780,7 +7780,6 @@ export default function EspritPadelCommunication() {
     if (bizUser) {
       // État 3 : tout est prêt, correspondance trouvée
       setCurrentUserId(bizUser.id);
-      CURRENT_USER_ID = bizUser.id;
       setLoggedIn(true);
       setLoginLoading(false);
       setLoginError("");
@@ -7856,7 +7855,6 @@ export default function EspritPadelCommunication() {
       const user = userList.find(u => u.email && u.email.toLowerCase() === loginEmail.toLowerCase().trim() && u.password === loginPassword);
       if (user) {
         setCurrentUserId(user.id);
-        CURRENT_USER_ID = user.id;
         setLoggedIn(true);
         // FCM permission is NOT requested here - handled by user click on 🔔 button
         try {
@@ -8404,7 +8402,7 @@ ${guestForm.description || "(Aucune description)"}
           {page === "projects" && <ProjectsPage clubs={scopedClubs} users={scopedUsers} projects={scopedProjects} setProjects={setProjects} tasks={scopedTasks} setTasks={setTasks} currentUserId={currentUserId} isAdmin={isAdmin} addToast={addToast} notifyUser={notifyUser} />}
           {page === "reporting" && <ReportingPage clubs={clubs} reportingData={reportingData} setReportingData={setReportingData} currentUserId={currentUserId} isAdmin={isAdmin} currentUser={currentUser} />}
           {page === "metricool-approvals" && isAdmin && <MetricoolApprovalsPage approvals={metricoolApprovals} />}
-          {page === "editorial" && <EditorialPage clubs={clubs} publications={publications} setPublications={setPublications} />}
+          {page === "editorial" && <EditorialPage clubs={clubs} publications={publications} setPublications={setPublications} currentUserId={currentUserId} />}
           {page === "calendar" && <CalendarPage meetings={scopedMeetings} setMeetings={setMeetings} tasks={scopedTasks} setTasks={setTasks} calendarEvents={calendarEvents} setCalendarEvents={setCalendarEvents} currentUserId={currentUserId} isAdmin={isAdmin} campagnes={campagnes} tournaments={scopedTournaments} />}
           {(page === "drive" || page === "documents") && <DrivePage isMobile={isMobile} clubs={scopedClubs} isAdmin={isAdmin} />}
           {page === "tournaments" && <TournamentsPage clubs={clubs} tournaments={tournaments} setTournaments={setTournaments} users={users} currentUserId={currentUserId} currentUser={currentUser} isAdmin={isAdmin} />}
