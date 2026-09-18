@@ -7809,7 +7809,6 @@ export default function EspritPadelCommunication() {
         if (err.code === "auth/user-not-found" || err.code === "auth/invalid-email") {
           setLoginForgotSent(true); // Ne pas révéler si l'email existe
         } else {
-          console.error("[Firebase] resetPassword error:", err.code, err.message);
           setLoginError("Impossible d'envoyer l'email. Réessayez dans quelques instants.");
         }
       }
