@@ -8101,7 +8101,7 @@ ${guestForm.description || "(Aucune description)"}
           </div>
 
           <div style={{ textAlign: "center", marginTop: 20 }}>
-            <div style={{ fontSize: 10, color: "rgba(255,255,255,0.3)" }}>Esprit Padel Communication © 2026 • Test déploiement automatique</div>
+            <div style={{ fontSize: 10, color: "rgba(255,255,255,0.3)" }}>Esprit Padel Communication © 2026</div>
           </div>
         </div>
       </div>
