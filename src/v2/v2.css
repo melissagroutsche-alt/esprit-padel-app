@@ -655,7 +655,7 @@
 }
 .v2-dash-row {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
   gap: 16px;
   align-items: stretch;
 }
@@ -1363,7 +1363,7 @@
   .v2-dash-counters { grid-template-columns: repeat(2, 1fr); gap: 10px; }
   .v2-dash-content { flex-direction: column; }
   .v2-dash-agenda { width: 100%; order: -1; flex-direction: column; }
-  .v2-dash-row { grid-template-columns: 1fr; }
+  .v2-dash-row { grid-template-columns: 1fr; gap: 12px; }
   .v2-dash-body { grid-template-columns: 1fr; }
   .v2-dash-col-side { order: -1; }
   .v2-dashboard { padding: 16px 14px 80px; }
