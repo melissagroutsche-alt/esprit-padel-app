@@ -637,7 +637,7 @@
 .v2-dash-content {
   display: flex;
   gap: 20px;
-  align-items: flex-start;
+  align-items: stretch;
 }
 .v2-dash-main {
   flex: 1;
@@ -655,7 +655,7 @@
 }
 .v2-dash-row {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: 1fr 1fr;
   gap: 16px;
   align-items: stretch;
 }

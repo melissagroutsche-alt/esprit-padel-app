@@ -684,7 +684,7 @@ export default function DashboardV2({ appId, currentUser, onNavigate }) {
 
           <CampaignBanner campaign={activeCampaign} onNavigate={onNavigate} />
 
-          {/* Boîte mail + Objectifs + Demandes récentes — grille 3 colonnes alignées */}
+          {/* Boîte mail + Objectifs — 2 colonnes égales */}
           <div className="v2-dash-row">
             <MailCard onNavigate={onNavigate} />
             <ObjectivesCard
@@ -692,21 +692,21 @@ export default function DashboardV2({ appId, currentUser, onNavigate }) {
               loading={loadingObj}
               onNavigate={onNavigate}
             />
-            <RecentDemandsTasks
-              tasks={tasks}
-              requests={requests}
-              loadingTasks={loadingTasks}
-              loadingReq={loadingReq}
-              onNavigate={onNavigate}
-            />
           </div>
         </div>
 
-        {/* Colonne droite : agenda uniquement */}
+        {/* Colonne droite : agenda + demandes récentes */}
         <div className="v2-dash-agenda">
           <AgendaCard
             events={events}
             loading={loadingCal}
+            onNavigate={onNavigate}
+          />
+          <RecentDemandsTasks
+            tasks={tasks}
+            requests={requests}
+            loadingTasks={loadingTasks}
+            loadingReq={loadingReq}
             onNavigate={onNavigate}
           />
         </div>
