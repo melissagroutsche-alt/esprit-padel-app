@@ -640,47 +640,48 @@ export default function DashboardV2({ appId, currentUser, onNavigate }) {
         </div>
       </div>
 
-      {/* ── 4 COUNTER CARDS ── */}
-      <div className="v2-dash-counters">
-        <CounterCard
-          icon={IconCheckSquare}
-          value={loadingTasks ? "—" : todayTasks.length}
-          label="À traiter aujourd'hui"
-          sub={todayTasks.length > 0 ? `${todayTasks.length} tâche${todayTasks.length > 1 ? "s" : ""} en attente` : "Aucune tâche urgente"}
-          color="yellow"
-          onClick={() => onNavigate("projets")}
-        />
-        <CounterCard
-          icon={IconMail}
-          value="—"
-          label="Boîte mail"
-          sub="Non connectée"
-          color="blue"
-          onClick={() => onNavigate("mail")}
-        />
-        <CounterCard
-          icon={IconInbox}
-          value={loadingReq ? "—" : openRequests.length}
-          label="Demandes clubs"
-          sub="demandes ouvertes"
-          color="orange"
-          onClick={() => onNavigate("demandes")}
-        />
-        <CounterCard
-          icon={IconLayers}
-          value={loadingPub ? "—" : pendingValidations.length}
-          label="Validations"
-          sub="contenus à valider"
-          color="gray"
-          onClick={() => onNavigate("contenus")}
-        />
-      </div>
-
-      {/* ── CORPS : zone principale + colonne agenda ── */}
+      {/* ── CORPS : 4 cartes + campagne/mail/obj | agenda + récents ── */}
       <div className="v2-dash-content">
 
         {/* Colonne principale */}
         <div className="v2-dash-main">
+
+          {/* 4 counter cards — dans la colonne principale pour aligner avec l'agenda */}
+          <div className="v2-dash-counters">
+            <CounterCard
+              icon={IconCheckSquare}
+              value={loadingTasks ? "—" : todayTasks.length}
+              label="À traiter aujourd'hui"
+              sub={todayTasks.length > 0 ? `${todayTasks.length} tâche${todayTasks.length > 1 ? "s" : ""} en attente` : "Aucune tâche urgente"}
+              color="yellow"
+              onClick={() => onNavigate("projets")}
+            />
+            <CounterCard
+              icon={IconMail}
+              value="—"
+              label="Boîte mail"
+              sub="Non connectée"
+              color="blue"
+              onClick={() => onNavigate("mail")}
+            />
+            <CounterCard
+              icon={IconInbox}
+              value={loadingReq ? "—" : openRequests.length}
+              label="Demandes clubs"
+              sub="demandes ouvertes"
+              color="orange"
+              onClick={() => onNavigate("demandes")}
+            />
+            <CounterCard
+              icon={IconLayers}
+              value={loadingPub ? "—" : pendingValidations.length}
+              label="Validations"
+              sub="contenus à valider"
+              color="gray"
+              onClick={() => onNavigate("contenus")}
+            />
+          </div>
+
           <CampaignBanner campaign={activeCampaign} onNavigate={onNavigate} />
 
           <div className="v2-dash-row">
@@ -691,21 +692,20 @@ export default function DashboardV2({ appId, currentUser, onNavigate }) {
               onNavigate={onNavigate}
             />
           </div>
+        </div>
 
+        {/* Colonne droite : agenda + demandes & tâches récentes */}
+        <div className="v2-dash-agenda">
+          <AgendaCard
+            events={events}
+            loading={loadingCal}
+            onNavigate={onNavigate}
+          />
           <RecentDemandsTasks
             tasks={tasks}
             requests={requests}
             loadingTasks={loadingTasks}
             loadingReq={loadingReq}
-            onNavigate={onNavigate}
-          />
-        </div>
-
-        {/* Colonne agenda */}
-        <div className="v2-dash-agenda">
-          <AgendaCard
-            events={events}
-            loading={loadingCal}
             onNavigate={onNavigate}
           />
         </div>

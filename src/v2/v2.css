@@ -550,17 +550,16 @@
 .v2-dash-counters {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 14px;
-  margin-bottom: 22px;
+  gap: 12px;
 }
 .v2-counter {
-  border-radius: 18px;
-  padding: 20px 20px 18px;
+  border-radius: 16px;
+  padding: 14px 16px 13px;
   cursor: pointer;
   transition: transform .15s, box-shadow .15s;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 10px;
   position: relative;
   overflow: hidden;
   border: 1.5px solid transparent;
@@ -568,20 +567,20 @@
 .v2-counter:hover { transform: translateY(-2px); box-shadow: 0 6px 24px rgba(0,0,0,.10); }
 .v2-counter__top {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
 }
 .v2-counter__icon {
-  width: 40px; height: 40px;
-  border-radius: 12px;
+  width: 34px; height: 34px;
+  border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
 }
-.v2-counter__icon svg { width: 20px; height: 20px; }
+.v2-counter__icon svg { width: 17px; height: 17px; }
 .v2-counter__arrow {
-  width: 28px; height: 28px;
+  width: 24px; height: 24px;
   border-radius: 50%;
   background: rgba(0,0,0,.06);
   display: flex;
@@ -591,24 +590,24 @@
   transition: background .12s;
 }
 .v2-counter:hover .v2-counter__arrow { background: rgba(0,0,0,.11); }
-.v2-counter__arrow svg { width: 14px; height: 14px; }
+.v2-counter__arrow svg { width: 12px; height: 12px; }
 .v2-counter__value {
-  font-size: 34px;
+  font-size: 28px;
   font-weight: 800;
   letter-spacing: -.03em;
   line-height: 1;
-  margin-bottom: 4px;
+  margin-bottom: 2px;
   color: var(--text);
 }
 .v2-counter__label {
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--text-2);
 }
 .v2-counter__sub {
-  font-size: 10.5px;
+  font-size: 10px;
   color: var(--text-3);
-  margin-top: 2px;
+  margin-top: 1px;
 }
 
 /* Counter color variants — pastel card backgrounds */
@@ -634,7 +633,7 @@
 .v2-counter--gray .v2-counter__icon { background: rgba(0,0,0,.06); color: var(--text-3); }
 .v2-counter--gray .v2-counter__value { color: var(--text-3); }
 
-/* ── Dashboard body: main content + right agenda column ── */
+/* ── Dashboard body: main content + right column ── */
 .v2-dash-content {
   display: flex;
   gap: 20px;
@@ -650,6 +649,9 @@
 .v2-dash-agenda {
   width: 310px;
   flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 .v2-dash-row {
   display: grid;
@@ -1358,7 +1360,7 @@
 
   .v2-dash-counters { grid-template-columns: repeat(2, 1fr); gap: 10px; }
   .v2-dash-content { flex-direction: column; }
-  .v2-dash-agenda { width: 100%; order: -1; }
+  .v2-dash-agenda { width: 100%; order: -1; flex-direction: column; }
   .v2-dash-row { grid-template-columns: 1fr; }
   .v2-dash-body { grid-template-columns: 1fr; }
   .v2-dash-col-side { order: -1; }
