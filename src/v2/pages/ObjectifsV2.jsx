@@ -1,67 +1,94 @@
 /**
  * ObjectifsV2 — Page Objectifs V2 Esprit Padel OS
- * Cockpit SaaS premium : liste + vue détail d'un objectif
+ * Cockpit SaaS premium : liste cockpit + vue détail 3 colonnes
  * READ-ONLY vis-à-vis de Firestore.
  */
 import React, { useState, useMemo } from "react";
 import {
-  useObjectives, useUsers, useTasks, usePublications,
-  useCalendarEvents, useProjects, filterActiveObjectives,
+  useObjectives, useUsers, useClubs, useTasks, usePublications,
+  useCalendarEvents, useProjects,
 } from "../hooks/useV1Data";
 
-/* ── Helpers ── */
-function pct(current, baseline, target) {
-  if (target === undefined || target === null) return 0;
-  const c = Number(current || 0);
-  const b = Number(baseline || 0);
-  const t = Number(target || 0);
+/* ══════════════════════════════════════
+   HELPERS
+══════════════════════════════════════ */
+function objPct(o) {
+  if (o.progress !== undefined && o.progress !== null) return Math.max(0, Math.min(100, Number(o.progress)));
+  const c = Number(o.current || 0);
+  const b = Number(o.baseline || 0);
+  const t = Number(o.target || 0);
   if (t <= b) return t > 0 ? Math.max(0, Math.min(100, Math.round((c / t) * 100))) : 0;
   return Math.max(0, Math.min(100, Math.round(((c - b) / (t - b)) * 100)));
-}
-function objPct(o) {
-  if (o.progress !== undefined && o.progress !== null) return Number(o.progress);
-  return pct(o.current, o.baseline, o.target);
 }
 function fmtDate(d) {
   if (!d) return "—";
   const dt = new Date(d);
-  if (isNaN(dt)) return d;
+  if (isNaN(dt.getTime())) return d;
   return dt.toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" });
 }
 function fmtShort(d) {
   if (!d) return "—";
   const dt = new Date(d);
-  if (isNaN(dt)) return d;
+  if (isNaN(dt.getTime())) return d;
   return dt.toLocaleDateString("fr-FR", { day: "numeric", month: "short" });
 }
 function statusLabel(s) {
-  const map = { active: "En cours", scheduled: "Planifié", success: "Réussi", almost_success: "Presque réussi", failed: "Raté" };
-  return map[s] || s || "En cours";
+  const norm = (s || "").toLowerCase();
+  if (norm === "active" || norm === "actif" || norm === "en cours") return "En cours";
+  if (norm === "scheduled" || norm === "planifié") return "Planifié";
+  if (norm === "success" || norm === "réussi") return "Réussi";
+  if (norm === "almost_success") return "Presque réussi";
+  if (norm === "failed" || norm === "raté") return "Raté";
+  return s || "En cours";
 }
 function statusColor(s) {
-  if (s === "success") return { bg: "#eaf7ee", text: "#1a7a38", dot: "#1a7a38" };
-  if (s === "almost_success") return { bg: "#fef8e4", text: "#8a5c00", dot: "#FEB601" };
-  if (s === "failed") return { bg: "#fdf0ee", text: "#bf3327", dot: "#bf3327" };
-  if (s === "scheduled") return { bg: "#eff6ff", text: "#0F56B8", dot: "#0F56B8" };
+  const n = (s || "").toLowerCase();
+  if (n === "success" || n === "réussi") return { bg: "#eaf7ee", text: "#1a7a38", dot: "#1a7a38" };
+  if (n === "almost_success") return { bg: "#fef8e4", text: "#8a5c00", dot: "#FEB601" };
+  if (n === "failed" || n === "raté") return { bg: "#fdf0ee", text: "#bf3327", dot: "#bf3327" };
+  if (n === "scheduled" || n === "planifié") return { bg: "#eff6ff", text: "#0F56B8", dot: "#0F56B8" };
   return { bg: "#eaf7ee", text: "#1a7a38", dot: "#1a7a38" };
 }
-function clubColor(clubId) {
-  const map = { "1": "#0F56B8", "2": "#FB8500", "3": "#1a7a38" };
-  return map[String(clubId)] || "#9896a0";
+function isActive(o) {
+  const n = (o.status || "").toLowerCase();
+  return !n || n === "active" || n === "actif" || n === "en cours";
 }
-function clubName(clubId, clubs) {
+function isScheduled(o) {
+  const n = (o.status || "").toLowerCase();
+  return n === "scheduled" || n === "planifié";
+}
+function isFinished(o) {
+  const n = (o.status || "").toLowerCase();
+  return n === "success" || n === "almost_success" || n === "failed" || n === "réussi" || n === "raté";
+}
+
+/* Résolution club — jamais d'ID visible */
+function resolveClub(clubId, clubs) {
+  if (!clubId) return null;
   if (clubs && clubs.length) {
     const c = clubs.find(x => String(x.id) === String(clubId));
-    if (c) return c.name;
+    if (c) return c;
   }
-  const map = { "1": "Saint-Priest", "2": "La Boisse", "3": "Mâcon" };
-  return map[String(clubId)] || `Club ${clubId}`;
+  /* Fallback pour IDs historiques connus */
+  const known = { "1": "Saint-Priest", "2": "La Boisse", "3": "Mâcon" };
+  const name = known[String(clubId)];
+  if (name) return { id: clubId, name, color: null };
+  return { id: clubId, name: "Club non renseigné", color: null };
 }
-function userName(userId, users) {
-  if (!users || !userId) return null;
-  const u = users.find(x => String(x.id) === String(userId) || String(x.appId) === String(userId));
-  if (!u) return null;
-  return u.firstName ? `${u.firstName} ${u.lastName || ""}`.trim() : u.name || null;
+function clubAccentColor(club) {
+  if (!club) return "#9896a0";
+  if (club.color) return club.color;
+  const map = { "Saint-Priest": "#0F56B8", "La Boisse": "#FB8500", "Mâcon": "#1a7a38" };
+  return map[club.name] || "#9896a0";
+}
+
+function resolveUser(userId, users) {
+  if (!userId || !users?.length) return null;
+  return users.find(u => String(u.id) === String(userId) || String(u.appId) === String(userId)) || null;
+}
+function userName(user) {
+  if (!user) return null;
+  return user.firstName ? `${user.firstName} ${user.lastName || ""}`.trim() : user.name || null;
 }
 function initials(name) {
   if (!name) return "?";
@@ -70,739 +97,805 @@ function initials(name) {
 function daysLeft(deadline) {
   if (!deadline) return null;
   const d = new Date(deadline);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const diff = Math.ceil((d - today) / 86400000);
-  return diff;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  return Math.ceil((d - today) / 86400000);
 }
 
-/* ── SVG inline icons ── */
-function Ico({ d, size = 14 }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
-      stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <path d={d} />
-    </svg>
-  );
+/* Calcule les signaux d'alerte à partir de données réelles */
+function computeAlerts(o, linkedTasks) {
+  const alerts = [];
+  const dl = daysLeft(o.deadline);
+  const p = objPct(o);
+  if (dl !== null && dl < 0 && !isFinished(o)) {
+    alerts.push({ type: "red", text: `Échéance dépassée de ${Math.abs(dl)}j` });
+  } else if (dl !== null && dl <= 10 && dl >= 0 && !isFinished(o)) {
+    alerts.push({ type: "orange", text: `Échéance dans ${dl} jour${dl > 1 ? "s" : ""}` });
+  }
+  if (!isFinished(o) && !isScheduled(o) && p < 25) {
+    alerts.push({ type: "orange", text: "Progression inférieure à 25%" });
+  }
+  const overdueTasks = (linkedTasks || []).filter(t => {
+    if (!t || t.status === "Terminé" || t.status === "done") return false;
+    return t.deadline && new Date(t.deadline) < new Date();
+  });
+  if (overdueTasks.length > 0) {
+    alerts.push({ type: "orange", text: `${overdueTasks.length} tâche${overdueTasks.length > 1 ? "s" : ""} en retard` });
+  }
+  return alerts;
 }
-function IcoTarget({ size = 14 }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
-      stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="5" />
-      <circle cx="12" cy="12" r="1" fill="currentColor" stroke="none" />
-    </svg>
-  );
+
+/* ══════════════════════════════════════
+   SVG ICONS
+══════════════════════════════════════ */
+function IcoTarget({ size = 14, ...p }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" {...p}><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="5" /><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none" /></svg>;
 }
-function IcoChevRight({ size = 12 }) {
+function IcoChevR({ size = 12 }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9,18 15,12 9,6" /></svg>;
 }
-function IcoChevLeft({ size = 14 }) {
+function IcoChevL({ size = 13 }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15,18 9,12 15,6" /></svg>;
 }
-function IcoSearch({ size = 14 }) {
-  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8" /><path d="M21 21l-4.35-4.35" /></svg>;
-}
-function IcoCalendar({ size = 13 }) {
+function IcoCal({ size = 12 }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" /><path d="M8 2v4M16 2v4M3 10h18" /></svg>;
 }
-function IcoUser({ size = 13 }) {
+function IcoUser({ size = 12 }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>;
 }
-function IcoBarChart({ size = 13 }) {
-  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="14" width="4" height="7" rx="1" /><rect x="10" y="9" width="4" height="12" rx="1" /><rect x="17" y="5" width="4" height="16" rx="1" /></svg>;
-}
-function IcoAlert({ size = 13 }) {
+function IcoAlert({ size = 12 }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /><line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>;
 }
-function IcoCheck({ size = 12 }) {
+function IcoEdit({ size = 13 }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>;
+}
+function IcoCheck({ size = 10 }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20,6 9,17 4,12" /></svg>;
 }
-function IcoPlus({ size = 13 }) {
+function IcoPlus({ size = 11 }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>;
 }
-function IcoLink({ size = 13 }) {
-  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71" /></svg>;
-}
-function IcoMegaphone({ size = 13 }) {
+function IcoMega({ size = 13 }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8a4 4 0 010 8" /><path d="M20 4a8 8 0 010 16" /><rect x="2" y="9" width="8" height="6" rx="1.5" /><path d="M10 9l8-5v16l-8-5" /></svg>;
 }
 function IcoLayers({ size = 13 }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polygon points="12,2 22,8.5 12,15 2,8.5" /><path d="M2 15.5l10 6.5 10-6.5" /><path d="M2 11.5l10 6.5 10-6.5" /></svg>;
 }
-function IcoClock({ size = 13 }) {
+function IcoClock({ size = 12 }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><polyline points="12,6 12,12 16,14" /></svg>;
 }
 function IcoEvent({ size = 13 }) {
-  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" /></svg>;
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" /><path d="M8 2v4M16 2v4M3 10h18" /><path d="M8 14h.01M12 14h.01M16 14h.01" /></svg>;
 }
-function IcoEdit({ size = 13 }) {
-  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>;
+function IcoBar({ size = 13 }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="14" width="4" height="7" rx="1" /><rect x="10" y="9" width="4" height="12" rx="1" /><rect x="17" y="5" width="4" height="16" rx="1" /></svg>;
 }
 
-/* ── Pill badge ── */
-function Badge({ label, bg, color }) {
+/* ── Primitives ── */
+function Badge({ label, bg, color, dot }) {
   return (
     <span style={{
       display: "inline-flex", alignItems: "center", gap: 4,
       background: bg || "var(--gray-bg)", color: color || "var(--text-2)",
       fontSize: 10.5, fontWeight: 700, borderRadius: 20,
-      padding: "2px 9px", lineHeight: 1.5, whiteSpace: "nowrap",
+      padding: "2px 9px", lineHeight: 1.6, whiteSpace: "nowrap",
     }}>
+      {dot && <span style={{ width: 5, height: 5, borderRadius: "50%", background: dot, display: "inline-block" }} />}
       {label}
     </span>
   );
 }
-
-/* ── Progress bar ── */
-function ProgressBar({ value, color, height = 5 }) {
+function ProgressBar({ value, color, height = 4 }) {
   const v = Math.max(0, Math.min(100, value || 0));
   const c = color || (v >= 80 ? "#1a7a38" : v >= 50 ? "#FEB601" : "#FB8500");
   return (
     <div style={{ height, borderRadius: height, background: "#ECEAE5", overflow: "hidden", minWidth: 0 }}>
-      <div style={{ height: "100%", width: `${v}%`, background: c, borderRadius: height, transition: "width .4s ease" }} />
+      <div style={{ height: "100%", width: `${v}%`, background: c, borderRadius: height, transition: "width .35s ease" }} />
+    </div>
+  );
+}
+function Avatar({ name, size = 26 }) {
+  return (
+    <div style={{
+      width: size, height: size, borderRadius: "50%",
+      background: "#e0eaff", color: "#0F56B8",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      fontSize: size * 0.36, fontWeight: 700, flexShrink: 0,
+    }}>
+      {initials(name)}
+    </div>
+  );
+}
+function EmptyRow({ icon, text }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 16px", color: "var(--text-3)", fontSize: 12 }}>
+      <span style={{ opacity: .5 }}>{icon}</span>
+      <span>{text}</span>
     </div>
   );
 }
 
-/* ── KPI indicator row ── */
-const KPI_ICONS = [
-  <IcoBarChart size={14} />, <IcoTarget size={14} />, <IcoCheck size={14} />,
-  <IcoLayers size={14} />, <IcoEvent size={14} />, <IcoUser size={14} />,
-  <IcoMegaphone size={14} />, <IcoLink size={14} />,
-];
-const KPI_COLORS = [
-  { bg: "rgba(254,182,1,.14)", color: "#8a5c00" },
-  { bg: "rgba(15,86,184,.11)", color: "#0F56B8" },
-  { bg: "rgba(26,122,56,.12)", color: "#1a7a38" },
-  { bg: "rgba(251,133,0,.12)", color: "#b05a00" },
-  { bg: "rgba(15,86,184,.11)", color: "#0F56B8" },
-  { bg: "rgba(26,122,56,.12)", color: "#1a7a38" },
-  { bg: "rgba(254,182,1,.14)", color: "#8a5c00" },
-  { bg: "rgba(251,133,0,.12)", color: "#b05a00" },
-];
+/* ══════════════════════════════════════
+   LISTE — MODULE COCKPIT GAUCHE
+══════════════════════════════════════ */
+function WatchModule({ objectives, clubs, tasks }) {
+  /* Objectifs nécessitant attention (règles calculées, pas de priorité inventée) */
+  const watched = useMemo(() => {
+    return objectives
+      .filter(o => !isFinished(o) && !isScheduled(o))
+      .map(o => {
+        const linkedT = tasks.filter(t => String(t.objectiveId) === String(o.id) || String(t.objective) === String(o.id));
+        const alerts = computeAlerts(o, linkedT);
+        return { o, alerts };
+      })
+      .filter(x => x.alerts.length > 0)
+      .slice(0, 4);
+  }, [objectives, tasks]);
 
-function KpiRow({ label, value, target, unit, idx }) {
-  const v = Number(value || 0);
-  const t = Number(target || 0);
-  const progress = t > 0 ? Math.min(100, Math.round((v / t) * 100)) : 0;
-  const pal = KPI_COLORS[idx % KPI_COLORS.length];
-  const isMock = target === "MOCK";
+  if (watched.length === 0) return null;
   return (
-    <div className="obj-kpi-row">
-      <div className="obj-kpi-icon" style={{ background: pal.bg, color: pal.color }}>
-        {KPI_ICONS[idx % KPI_ICONS.length]}
+    <div className="obj-module">
+      <div className="obj-module-header">
+        <span style={{ color: "#b05a00" }}><IcoAlert size={12} /></span>
+        <span className="obj-module-title">À surveiller</span>
+        <span className="obj-module-count" style={{ background: "var(--orange-bg)", color: "#b05a00" }}>{watched.length}</span>
       </div>
-      <div className="obj-kpi-body">
-        <div className="obj-kpi-top">
-          <span className="obj-kpi-label">{label}</span>
-          {isMock && <span className="obj-mock-tag">aperçu</span>}
-          <span className="obj-kpi-value">
-            {isMock ? <span style={{ color: "var(--text-3)" }}>—</span> : (
-              <>{Number(v).toLocaleString("fr-FR")}<span style={{ color: "var(--text-3)", fontWeight: 500 }}> / {Number(t).toLocaleString("fr-FR")} {unit}</span></>
-            )}
-          </span>
+      {watched.map(({ o, alerts }) => {
+        const club = resolveClub(o.club, clubs);
+        const acc = clubAccentColor(club);
+        const p = objPct(o);
+        return (
+          <div key={o.id} className="obj-module-row">
+            <div className="obj-module-row-dot" style={{ background: acc }} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div className="obj-module-row-name">{o.title}</div>
+              <div className="obj-module-row-meta">{alerts[0]?.text}</div>
+              <ProgressBar value={p} height={3} />
+            </div>
+            <span className="obj-module-row-pct">{p}%</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function DeadlineModule({ objectives }) {
+  const upcoming = useMemo(() => {
+    return objectives
+      .filter(o => !isFinished(o) && o.deadline)
+      .map(o => ({ o, dl: daysLeft(o.deadline) }))
+      .filter(x => x.dl !== null && x.dl >= 0 && x.dl <= 60)
+      .sort((a, b) => a.dl - b.dl)
+      .slice(0, 5);
+  }, [objectives]);
+
+  if (upcoming.length === 0) return null;
+  return (
+    <div className="obj-module">
+      <div className="obj-module-header">
+        <span style={{ color: "var(--ep-blue)" }}><IcoCal size={12} /></span>
+        <span className="obj-module-title">Prochaines échéances</span>
+      </div>
+      {upcoming.map(({ o, dl }) => {
+        const isClose = dl <= 14;
+        return (
+          <div key={o.id} className="obj-module-row">
+            <div className="obj-deadline-badge" style={{ color: isClose ? "#b05a00" : "var(--ep-blue)", background: isClose ? "var(--orange-bg)" : "var(--blue-bg)" }}>
+              <span style={{ fontSize: 13, fontWeight: 800, lineHeight: 1 }}>{dl}</span>
+              <span style={{ fontSize: 9, fontWeight: 600 }}>j</span>
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div className="obj-module-row-name">{o.title}</div>
+              <div className="obj-module-row-meta">{fmtDate(o.deadline)}</div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function SummaryModule({ objectives }) {
+  const actifs = objectives.filter(o => isActive(o)).length;
+  const planifies = objectives.filter(o => isScheduled(o)).length;
+  const termines = objectives.filter(o => isFinished(o)).length;
+  const avgPct = useMemo(() => {
+    const active = objectives.filter(o => isActive(o));
+    if (!active.length) return 0;
+    return Math.round(active.reduce((acc, o) => acc + objPct(o), 0) / active.length);
+  }, [objectives]);
+
+  return (
+    <div className="obj-module obj-module--summary">
+      <div className="obj-module-header">
+        <span style={{ color: "#8a5c00" }}><IcoBar size={12} /></span>
+        <span className="obj-module-title">Vue d'ensemble</span>
+      </div>
+      <div className="obj-summary-stats">
+        <div className="obj-summary-stat">
+          <span className="obj-summary-val" style={{ color: "#1a7a38" }}>{actifs}</span>
+          <span className="obj-summary-label">En cours</span>
         </div>
-        <ProgressBar value={isMock ? 0 : progress} color={pal.color} height={4} />
+        <div className="obj-summary-stat">
+          <span className="obj-summary-val" style={{ color: "var(--ep-blue)" }}>{planifies}</span>
+          <span className="obj-summary-label">Planifiés</span>
+        </div>
+        <div className="obj-summary-stat">
+          <span className="obj-summary-val" style={{ color: "var(--text-3)" }}>{termines}</span>
+          <span className="obj-summary-label">Terminés</span>
+        </div>
       </div>
-      <button className="obj-kpi-arrow"><IcoChevRight size={11} /></button>
+      {actifs > 0 && (
+        <div style={{ padding: "0 14px 12px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--text-3)", marginBottom: 5 }}>
+            <span>Progression moyenne</span>
+            <span style={{ fontWeight: 700, color: "var(--text)" }}>{avgPct}%</span>
+          </div>
+          <ProgressBar value={avgPct} height={5} />
+        </div>
+      )}
     </div>
   );
 }
 
-/* ── Empty state ── */
-function EmptyState({ icon, text, sub }) {
+/* ══════════════════════════════════════
+   LISTE — TABLEAU COMPACT DROITE
+══════════════════════════════════════ */
+function ObjTableRow({ o, clubs, users, onSelect }) {
+  const club = resolveClub(o.club, clubs);
+  const acc = clubAccentColor(club);
+  const p = objPct(o);
+  const sc = statusColor(o.status);
+  const dl = daysLeft(o.deadline);
+  const owner = resolveUser(o.owner || (o.assignedTo && o.assignedTo[0]), users);
+  const ownerName = userName(owner);
+  const dlText = dl === null ? null : dl < 0 ? `${Math.abs(dl)}j retard` : dl === 0 ? "Auj." : `${dl}j`;
+  const dlColor = dl !== null && dl < 0 ? "var(--red)" : dl !== null && dl <= 10 ? "#b05a00" : "var(--text-3)";
+
   return (
-    <div className="obj-empty">
-      <div className="obj-empty-icon">{icon}</div>
-      <div className="obj-empty-text">{text}</div>
-      {sub && <div className="obj-empty-sub">{sub}</div>}
+    <div className="obj-table-row" onClick={() => onSelect(o)}>
+      <div className="obj-table-row-indicator" style={{ background: acc }} />
+      <div className="obj-table-col obj-table-col--main">
+        <div className="obj-table-name">{o.title}</div>
+        <div className="obj-table-club" style={{ color: acc }}>{club?.name}</div>
+      </div>
+      <div className="obj-table-col obj-table-col--progress">
+        <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 4 }}>
+          <span className="obj-table-pct">{p}%</span>
+          <div style={{ flex: 1 }}><ProgressBar value={p} height={4} /></div>
+        </div>
+        <div style={{ fontSize: 10.5, color: "var(--text-3)", fontVariantNumeric: "tabular-nums" }}>
+          {Number(o.current || 0).toLocaleString("fr-FR")} / {Number(o.target || 0).toLocaleString("fr-FR")} {o.unit}
+        </div>
+      </div>
+      <div className="obj-table-col obj-table-col--status">
+        <Badge label={statusLabel(o.status)} bg={sc.bg} color={sc.text} dot={sc.dot} />
+      </div>
+      <div className="obj-table-col obj-table-col--deadline">
+        <span style={{ color: dlColor, fontSize: 11.5, fontWeight: 600 }}>{dlText || "—"}</span>
+        <div style={{ fontSize: 10.5, color: "var(--text-3)", marginTop: 1 }}>{fmtShort(o.deadline)}</div>
+      </div>
+      <div className="obj-table-col obj-table-col--owner">
+        {ownerName ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+            <Avatar name={ownerName} size={22} />
+            <span style={{ fontSize: 11, color: "var(--text-2)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 80 }}>{ownerName}</span>
+          </div>
+        ) : <span style={{ color: "var(--text-3)", fontSize: 11 }}>—</span>}
+      </div>
+      <div className="obj-table-col obj-table-col--arrow">
+        <IcoChevR size={11} />
+      </div>
     </div>
   );
 }
 
-/* ════════════════════════════════════════
-   LISTE DES OBJECTIFS
-════════════════════════════════════════ */
-function ObjectifsList({ objectives, users, onSelect }) {
-  const [search, setSearch] = useState("");
+/* ══════════════════════════════════════
+   PAGE LISTE PRINCIPALE
+══════════════════════════════════════ */
+function ObjectifsList({ objectives, clubs, users, tasks, onSelect }) {
   const [filter, setFilter] = useState("current");
-
   const FILTERS = [
     { key: "current", label: "En cours" },
     { key: "scheduled", label: "Planifiés" },
     { key: "finished", label: "Terminés" },
     { key: "all", label: "Tous" },
   ];
-
   const filtered = useMemo(() => {
-    const q = search.toLowerCase();
-    return objectives.filter(o => {
-      const s = o.status || "active";
-      const passFilter =
-        filter === "all" ? true :
-        filter === "current" ? (s === "active" || s === "en cours") :
-        filter === "scheduled" ? s === "scheduled" :
-        filter === "finished" ? ["success", "almost_success", "failed"].includes(s) :
-        true;
-      const passSearch = !q || (o.title || "").toLowerCase().includes(q);
-      return passFilter && passSearch;
-    });
-  }, [objectives, filter, search]);
+    return objectives.filter(o =>
+      filter === "all" ? true :
+      filter === "current" ? isActive(o) :
+      filter === "scheduled" ? isScheduled(o) :
+      filter === "finished" ? isFinished(o) :
+      true
+    );
+  }, [objectives, filter]);
+
+  const alertCount = useMemo(() => objectives.filter(o => {
+    if (isFinished(o)) return false;
+    const dl = daysLeft(o.deadline);
+    const p = objPct(o);
+    return (dl !== null && dl < 0) || (dl !== null && dl <= 10) || p < 25;
+  }).length, [objectives]);
 
   return (
     <div className="obj-list-page">
-      {/* Searchbar */}
-      <div className="obj-searchbar">
-        <IcoSearch size={15} />
-        <input
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          placeholder="Rechercher un objectif, un club, une campagne..."
-          className="obj-searchbar-input"
-        />
+      {/* Header */}
+      <div className="obj-list-header">
+        <div className="obj-list-header-left">
+          <div className="obj-list-icon"><IcoTarget size={18} /></div>
+          <div>
+            <h1 className="obj-list-title">Objectifs</h1>
+            <p className="obj-list-sub">
+              {objectives.filter(isActive).length} en cours
+              {alertCount > 0 && <span className="obj-alert-pill"><IcoAlert size={10} /> {alertCount} à surveiller</span>}
+            </p>
+          </div>
+        </div>
+        <div className="obj-filter-tabs">
+          {FILTERS.map(f => (
+            <button key={f.key} className={`obj-filter-tab${filter === f.key ? " active" : ""}`} onClick={() => setFilter(f.key)}>
+              {f.label}
+              <span className="obj-filter-tab-count">
+                {f.key === "current" ? objectives.filter(isActive).length :
+                 f.key === "scheduled" ? objectives.filter(isScheduled).length :
+                 f.key === "finished" ? objectives.filter(isFinished).length :
+                 objectives.length}
+              </span>
+            </button>
+          ))}
+        </div>
       </div>
 
-      {/* Header */}
-      <div className="obj-page-header">
-        <div className="obj-page-header-left">
-          <div className="obj-page-icon">
-            <IcoTarget size={20} />
+      {/* Cockpit layout */}
+      <div className="obj-cockpit">
+        {/* Colonne gauche — modules */}
+        <div className="obj-cockpit-left">
+          <SummaryModule objectives={objectives} />
+          <WatchModule objectives={objectives} clubs={clubs} tasks={tasks} />
+          <DeadlineModule objectives={objectives} />
+        </div>
+
+        {/* Colonne droite — tableau */}
+        <div className="obj-cockpit-right">
+          {filtered.length === 0 ? (
+            <div className="obj-table-empty">
+              <IcoTarget size={26} />
+              <span>Aucun objectif pour ce filtre</span>
+            </div>
+          ) : (
+            <>
+              <div className="obj-table-head">
+                <div className="obj-table-col obj-table-col--main">Objectif</div>
+                <div className="obj-table-col obj-table-col--progress">Progression</div>
+                <div className="obj-table-col obj-table-col--status">Statut</div>
+                <div className="obj-table-col obj-table-col--deadline">Échéance</div>
+                <div className="obj-table-col obj-table-col--owner">Responsable</div>
+                <div className="obj-table-col obj-table-col--arrow" />
+              </div>
+              {filtered.map(o => (
+                <ObjTableRow key={o.id} o={o} clubs={clubs} users={users} onSelect={onSelect} />
+              ))}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════
+   DÉTAIL — COLONNE GAUCHE
+══════════════════════════════════════ */
+function DetailLeft({ obj, clubs, users }) {
+  const club = resolveClub(obj.club, clubs);
+  const acc = clubAccentColor(club);
+  const sc = statusColor(obj.status);
+  const owner = resolveUser(obj.owner, users);
+  const ownerName = userName(owner);
+
+  return (
+    <>
+      {/* Bloc identité */}
+      <div className="obj-block">
+        <div className="obj-block-header">Identité de l'objectif</div>
+        <div className="obj-block-body">
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 14 }}>
+            <div style={{ width: 44, height: 44, borderRadius: 14, background: `${acc}18`, color: acc, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <IcoTarget size={20} />
+            </div>
+            <div>
+              <div style={{ fontSize: 15, fontWeight: 800, lineHeight: 1.3, color: "var(--text)" }}>{obj.title}</div>
+              <div style={{ marginTop: 5, display: "flex", gap: 5, flexWrap: "wrap" }}>
+                <Badge label={statusLabel(obj.status)} bg={sc.bg} color={sc.text} dot={sc.dot} />
+              </div>
+            </div>
           </div>
-          <div>
-            <h1 className="obj-page-title">Objectifs</h1>
-            <p className="obj-page-sub">{filtered.length} objectif{filtered.length !== 1 ? "s" : ""} · {objectives.filter(o => ["active","en cours"].includes(o.status || "active")).length} en cours</p>
+
+          {[
+            { icon: <IcoCal />, label: "Début", val: fmtDate(obj.startDate) },
+            { icon: <IcoCal />, label: "Échéance", val: fmtDate(obj.deadline) },
+            { icon: <IcoUser />, label: "Responsable", val: ownerName || "—" },
+            { icon: <span style={{ fontSize: 11 }}>◈</span>, label: "Club", val: (
+              <span style={{ fontSize: 11, fontWeight: 700, color: acc, background: `${acc}15`, padding: "2px 9px", borderRadius: 20, border: `1px solid ${acc}30` }}>
+                {club?.name}
+              </span>
+            )},
+            { icon: <IcoBar />, label: "Source", val: obj.source || obj.metricKey || "—" },
+            { icon: <IcoClock />, label: "Créé le", val: fmtDate(obj.createdAt) },
+          ].map((r, i) => (
+            <div key={i} className="obj-info-row">
+              <span className="obj-info-icon">{r.icon}</span>
+              <span className="obj-info-label">{r.label}</span>
+              <span className="obj-info-val">{r.val}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Résultat attendu */}
+      <div className="obj-block obj-block--accent">
+        <div className="obj-block-header">Résultat attendu</div>
+        <div className="obj-block-body">
+          {obj.target ? (
+            <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 8 }}>
+              <span style={{ fontSize: 28, fontWeight: 800, color: "var(--text)", fontVariantNumeric: "tabular-nums" }}>
+                {Number(obj.target).toLocaleString("fr-FR")}
+              </span>
+              <span style={{ fontSize: 13, color: "var(--text-2)", fontWeight: 600 }}>{obj.unit}</span>
+            </div>
+          ) : null}
+          <p style={{ fontSize: 12, color: "var(--text-2)", lineHeight: 1.55, marginBottom: 8 }}>
+            {obj.description || `Atteindre ${obj.target ? Number(obj.target).toLocaleString("fr-FR") : "la cible"} ${obj.unit || ""} d'ici le ${fmtDate(obj.deadline)}.`}
+          </p>
+          <div style={{ display: "flex", gap: 16, fontSize: 11, color: "var(--text-3)" }}>
+            <span>Départ&nbsp;: <strong style={{ color: "var(--text-2)" }}>{Number(obj.baseline || obj.current || 0).toLocaleString("fr-FR")} {obj.unit}</strong></span>
+            {obj.target && <span>Cible&nbsp;: <strong style={{ color: "var(--text-2)" }}>{Number(obj.target).toLocaleString("fr-FR")} {obj.unit}</strong></span>}
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+/* ══════════════════════════════════════
+   DÉTAIL — COLONNE CENTRALE
+══════════════════════════════════════ */
+function DetailCenter({ obj, users, tasks }) {
+  const p = objPct(obj);
+  const dl = daysLeft(obj.deadline);
+  const pColor = p >= 80 ? "#1a7a38" : p >= 50 ? "#FEB601" : "#FB8500";
+  const R = 30, C = 38, circ = 2 * Math.PI * R;
+
+  /* Seuls les KPI réellement calculables */
+  const linkedTasks = useMemo(() =>
+    tasks.filter(t => t && (String(t.objectiveId) === String(obj.id) || String(t.objective) === String(obj.id))),
+    [tasks, obj.id]
+  );
+  const doneTasks = linkedTasks.filter(t => t.status === "Terminé" || t.status === "done").length;
+  const totalTasks = linkedTasks.length;
+
+  const assignedUsers = useMemo(() => {
+    if (!users?.length) return [];
+    const ids = obj.assignedTo || (obj.owner ? [obj.owner] : []);
+    return ids.map(id => resolveUser(id, users)).filter(Boolean);
+  }, [users, obj]);
+
+  return (
+    <>
+      {/* Progression */}
+      <div className="obj-block">
+        <div className="obj-block-header">Progression</div>
+        <div className="obj-block-body" style={{ paddingBottom: 0 }}>
+          {/* Compact ring + chiffre */}
+          <div style={{ display: "flex", alignItems: "center", gap: 16, paddingBottom: 14, borderBottom: "1px solid var(--border)" }}>
+            <div style={{ position: "relative", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <svg width={C * 2} height={C * 2} viewBox={`0 0 ${C * 2} ${C * 2}`}>
+                <circle cx={C} cy={C} r={R} fill="none" stroke="#ECEAE5" strokeWidth="6" />
+                <circle cx={C} cy={C} r={R} fill="none"
+                  stroke={pColor} strokeWidth="6" strokeLinecap="round"
+                  strokeDasharray={circ} strokeDashoffset={circ * (1 - p / 100)}
+                  transform={`rotate(-90 ${C} ${C})`}
+                />
+              </svg>
+              <span style={{ position: "absolute", fontSize: 16, fontWeight: 800, color: "var(--text)", fontVariantNumeric: "tabular-nums" }}>{p}%</span>
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text)", marginBottom: 3 }}>Avancement global</div>
+              <div style={{ fontSize: 12, color: "var(--text-2)", marginBottom: 6, fontVariantNumeric: "tabular-nums" }}>
+                <strong>{Number(obj.current || 0).toLocaleString("fr-FR")}</strong>
+                <span style={{ color: "var(--text-3)" }}> / {Number(obj.target || 0).toLocaleString("fr-FR")} {obj.unit}</span>
+              </div>
+              {dl !== null && (
+                <div style={{ fontSize: 11, color: dl < 0 ? "var(--red)" : dl <= 14 ? "#b05a00" : "var(--text-3)", display: "flex", alignItems: "center", gap: 4 }}>
+                  <IcoClock size={11} />
+                  {dl < 0 ? `${Math.abs(dl)}j de retard` : dl === 0 ? "Échéance aujourd'hui" : `${dl}j restants`}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Indicateurs réels seulement */}
+          <div className="obj-kpi-section">
+            {/* Progression toujours présente */}
+            <KpiLine icon={<IcoBar size={13} />} label="Progression" value={`${p}%`} progress={p} color={pColor} />
+            {/* Tâches seulement si des relations existent */}
+            {totalTasks > 0 && (
+              <KpiLine icon={<IcoCheck size={12} />} label="Tâches liées" value={`${doneTasks} / ${totalTasks}`} progress={totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0} />
+            )}
           </div>
         </div>
       </div>
 
-      {/* Filters */}
-      <div className="obj-filter-bar">
-        {FILTERS.map(f => (
-          <button key={f.key} className={`obj-filter-btn${filter === f.key ? " active" : ""}`} onClick={() => setFilter(f.key)}>
-            {f.label}
-          </button>
-        ))}
+      {/* Évolution */}
+      <div className="obj-block">
+        <div className="obj-block-header">Évolution</div>
+        <div style={{ padding: "20px 16px", textAlign: "center" }}>
+          <div style={{ color: "var(--text-3)", opacity: .4, marginBottom: 8 }}><IcoBar size={22} /></div>
+          <p style={{ fontSize: 12, color: "var(--text-3)", lineHeight: 1.5, maxWidth: 240, margin: "0 auto" }}>
+            Le graphique d'évolution apparaîtra dès que plusieurs points de progression auront été enregistrés.
+          </p>
+        </div>
       </div>
 
-      {/* List */}
-      {filtered.length === 0 ? (
-        <EmptyState icon={<IcoTarget size={28} />} text="Aucun objectif trouvé" sub="Modifiez vos filtres ou créez un nouvel objectif." />
+      {/* Équipe */}
+      <div className="obj-block">
+        <div className="obj-block-header">Équipe</div>
+        {assignedUsers.length === 0 ? (
+          <EmptyRow icon={<IcoUser size={16} />} text="Aucun membre assigné" />
+        ) : (
+          <div>
+            {assignedUsers.map((u, i) => {
+              const name = userName(u) || "Membre";
+              const isOwner = String(u.id) === String(obj.owner) || String(u.appId) === String(obj.owner);
+              return (
+                <div key={u.id || i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 16px", borderBottom: "1px solid var(--border)" }}>
+                  <Avatar name={name} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--text)" }}>{name}</div>
+                    <div style={{ fontSize: 11, color: "var(--text-3)" }}>{u.role || "Contributeur"}</div>
+                  </div>
+                  {isOwner && <Badge label="Responsable" bg="var(--yellow-bg)" color="#8a5c00" />}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+function KpiLine({ icon, label, value, progress, color }) {
+  const c = color || (progress >= 80 ? "#1a7a38" : progress >= 50 ? "#FEB601" : "#FB8500");
+  return (
+    <div className="obj-kpi-line">
+      <span className="obj-kpi-line-icon" style={{ color: c }}>{icon}</span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+          <span style={{ fontSize: 12, fontWeight: 600, color: "var(--text)" }}>{label}</span>
+          <span style={{ fontSize: 12, fontWeight: 700, color: "var(--text)", fontVariantNumeric: "tabular-nums" }}>{value}</span>
+        </div>
+        <ProgressBar value={progress} color={c} height={3} />
+      </div>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════
+   DÉTAIL — COLONNE DROITE
+══════════════════════════════════════ */
+function RelatedBlock({ title, icon, items, renderRow, emptyText }) {
+  return (
+    <div className="obj-block">
+      <div className="obj-block-header">
+        {title}
+        <button className="obj-add-btn"><IcoPlus size={10} /></button>
+      </div>
+      {items.length === 0 ? (
+        <EmptyRow icon={icon} text={emptyText} />
       ) : (
-        <div className="obj-cards-grid">
-          {filtered.map(o => {
-            const p = objPct(o);
-            const sc = statusColor(o.status);
-            const dl = daysLeft(o.deadline);
-            const owner = userName(o.owner || (o.assignedTo && o.assignedTo[0]), users);
-            return (
-              <div key={o.id} className="obj-card" onClick={() => onSelect(o)}>
-                <div className="obj-card-header">
-                  <div className="obj-card-icon" style={{ background: `${clubColor(o.club)}18`, color: clubColor(o.club) }}>
-                    <IcoTarget size={15} />
-                  </div>
-                  <div className="obj-card-meta">
-                    <div className="obj-card-club" style={{ color: clubColor(o.club) }}>
-                      {clubName(o.club)}
-                    </div>
-                    <Badge label={statusLabel(o.status)} bg={sc.bg} color={sc.text} />
-                  </div>
-                  <IcoChevRight size={13} />
-                </div>
-                <div className="obj-card-title">{o.title}</div>
-                <div className="obj-card-progress">
-                  <ProgressBar value={p} />
-                  <div className="obj-card-pct">{p}%</div>
-                </div>
-                <div className="obj-card-footer">
-                  <span><IcoCalendar size={11} /> {fmtShort(o.startDate)} → {fmtShort(o.deadline)}</span>
-                  {dl !== null && (
-                    <span style={{ color: dl < 0 ? "var(--red)" : dl <= 14 ? "#b05a00" : "var(--text-3)" }}>
-                      {dl < 0 ? `${Math.abs(dl)}j de retard` : dl === 0 ? "Échéance aujourd'hui" : `${dl}j restants`}
-                    </span>
-                  )}
-                </div>
-                {owner && (
-                  <div className="obj-card-owner">
-                    <div className="obj-avatar obj-avatar-xs" style={{ background: "#e0eaff", color: "#0F56B8" }}>{initials(owner)}</div>
-                    <span>{owner}</span>
-                  </div>
-                )}
-              </div>
-            );
-          })}
+        <div>
+          {items.slice(0, 5).map((item, i) => (
+            <div key={i} className="obj-related-row">
+              {renderRow(item)}
+            </div>
+          ))}
         </div>
       )}
     </div>
   );
 }
 
-/* ════════════════════════════════════════
-   VUE DÉTAIL D'UN OBJECTIF
-════════════════════════════════════════ */
-function ObjectifDetail({ obj, users, tasks, publications, events, projects, onBack }) {
-  const p = objPct(obj);
-  const sc = statusColor(obj.status);
-  const dl = daysLeft(obj.deadline);
-
-  /* Relations réelles */
-  const linkedTasks = useMemo(() => {
-    if (!Array.isArray(tasks)) return [];
-    return tasks.filter(t => t && (
-      String(t.objectiveId) === String(obj.id) ||
-      String(t.objective) === String(obj.id)
-    ));
-  }, [tasks, obj.id]);
-
-  const linkedPubs = useMemo(() => {
-    if (!Array.isArray(publications)) return [];
-    return publications.filter(pub => pub && (
-      String(pub.objectiveId) === String(obj.id) ||
-      String(pub.objective) === String(obj.id)
-    ));
-  }, [publications, obj.id]);
-
-  const linkedEvents = useMemo(() => {
-    if (!Array.isArray(events)) return [];
-    return events.filter(ev => ev && (
-      String(ev.objectiveId) === String(obj.id) ||
-      String(ev.objective) === String(obj.id)
-    ));
-  }, [events, obj.id]);
-
-  const linkedProjects = useMemo(() => {
-    if (!Array.isArray(projects)) return [];
-    return projects.filter(pr => pr && (
-      String(pr.objectiveId) === String(obj.id) ||
-      String(pr.objective) === String(obj.id)
-    ));
-  }, [projects, obj.id]);
-
-  /* Alertes calculées */
+function DetailRight({ obj, clubs, tasks, publications, events, projects }) {
   const alerts = useMemo(() => {
-    const list = [];
-    if (dl !== null && dl < 0) list.push({ type: "red", text: `Échéance dépassée de ${Math.abs(dl)} jour${Math.abs(dl) > 1 ? "s" : ""}` });
-    else if (dl !== null && dl <= 14 && dl >= 0) list.push({ type: "orange", text: `Échéance dans ${dl} jour${dl > 1 ? "s" : ""}` });
-    if (p < 30 && (obj.status === "active" || !obj.status)) list.push({ type: "orange", text: "Progression inférieure à 30% — objectif à risque" });
-    const overdueTasks = linkedTasks.filter(t => {
-      if (t.status === "Terminé" || t.status === "done") return false;
-      if (!t.deadline) return false;
-      return new Date(t.deadline) < new Date();
-    });
-    if (overdueTasks.length > 0) list.push({ type: "orange", text: `${overdueTasks.length} tâche${overdueTasks.length > 1 ? "s" : ""} en retard` });
-    return list;
-  }, [dl, p, obj.status, linkedTasks]);
+    const linked = tasks.filter(t => t && (String(t.objectiveId) === String(obj.id) || String(t.objective) === String(obj.id)));
+    return computeAlerts(obj, linked);
+  }, [obj, tasks]);
 
-  /* KPI MOCK — marqués clairement, non présentés comme données réelles */
-  // MOCK: ces KPI sont des exemples visuels. Ils n'existent pas encore dans Firestore.
-  const MOCK_KPIS = [
-    { label: "Avancement global", value: p, target: 100, unit: "%", isMock: false },
-    { label: "Tâches terminées", value: linkedTasks.filter(t => t.status === "Terminé" || t.status === "done").length, target: linkedTasks.length || "MOCK", unit: "", isMock: linkedTasks.length === 0 },
-    { label: "Contenus publiés", value: linkedPubs.filter(pub => (pub.status || pub.statut || "").toLowerCase() === "publié" || (pub.status || "").toLowerCase() === "published").length, target: linkedPubs.length || "MOCK", unit: "", isMock: linkedPubs.length === 0 },
-    { label: "Clubs mobilisés", value: obj.club ? 1 : 0, target: 3, unit: "clubs", isMock: true },
-    { label: "Portée réseaux sociaux", value: null, target: "MOCK", unit: "", isMock: true },
-    { label: "Taux d'engagement", value: null, target: "MOCK", unit: "", isMock: true },
-  ];
-
-  const assignedUsers = useMemo(() => {
-    if (!users || !users.length) return [];
-    const ids = obj.assignedTo || (obj.owner ? [obj.owner] : []);
-    return ids.map(id => users.find(u => String(u.id) === String(id) || String(u.appId) === String(id))).filter(Boolean);
-  }, [users, obj]);
+  const linkedTasks = tasks.filter(t => t && (String(t.objectiveId) === String(obj.id) || String(t.objective) === String(obj.id)));
+  const linkedPubs = publications.filter(p => p && (String(p.objectiveId) === String(obj.id) || String(p.objective) === String(obj.id)));
+  const linkedEvents = events.filter(e => e && (String(e.objectiveId) === String(obj.id) || String(e.objective) === String(obj.id)));
+  const linkedProjects = projects.filter(p => p && (String(p.objectiveId) === String(obj.id) || String(p.objective) === String(obj.id)));
 
   return (
-    <div className="obj-detail-page">
-      {/* Searchbar */}
-      <div className="obj-searchbar">
-        <IcoSearch size={15} />
-        <input
-          readOnly
-          defaultValue=""
-          placeholder="Rechercher un objectif, une campagne, un contenu, un club..."
-          className="obj-searchbar-input"
-        />
-      </div>
-
-      {/* Breadcrumb */}
-      <div className="obj-breadcrumb">
-        <button className="obj-back-btn" onClick={onBack}><IcoChevLeft size={13} /> Objectifs</button>
-        <span className="obj-breadcrumb-sep"><IcoChevRight size={11} /></span>
-        <span className="obj-breadcrumb-current">{obj.title}</span>
-      </div>
-
-      {/* Page header */}
-      <div className="obj-detail-header">
-        <div className="obj-detail-header-left">
-          <div className="obj-detail-icon" style={{ background: `${clubColor(obj.club)}18`, color: clubColor(obj.club) }}>
-            <IcoTarget size={22} />
-          </div>
-          <div>
-            <div className="obj-detail-header-row">
-              <h1 className="obj-detail-title">{obj.title}</h1>
-              <span className="obj-status-dot" style={{ background: sc.dot }} />
-              <Badge label={statusLabel(obj.status)} bg={sc.bg} color={sc.text} />
-            </div>
-            <p className="obj-detail-sub">
-              Objectif de communication · {clubName(obj.club)} · créé le {fmtDate(obj.createdAt)}
-            </p>
-          </div>
-        </div>
-        <div className="obj-detail-header-right">
-          <div className="obj-period-card">
-            <div className="obj-period-line"><IcoCalendar size={11} />{fmtShort(obj.startDate)}</div>
-            <div className="obj-period-arrow">→</div>
-            <div className="obj-period-line"><IcoCalendar size={11} />{fmtShort(obj.deadline)}</div>
-          </div>
-          <button className="obj-btn-edit"><IcoEdit size={13} /> Modifier</button>
-          <button className="obj-btn-more">···</button>
-        </div>
-      </div>
-
-      {/* Alertes banner */}
+    <>
+      {/* Alertes */}
       {alerts.length > 0 && (
-        <div className="obj-alerts-banner">
+        <div className="obj-block obj-block--alert">
+          <div className="obj-block-header">
+            <span style={{ color: "#b05a00" }}><IcoAlert size={12} /></span>
+            Alertes
+            <span style={{ marginLeft: "auto", width: 18, height: 18, borderRadius: "50%", background: "var(--orange-bg)", color: "#b05a00", fontSize: 10, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center" }}>{alerts.length}</span>
+          </div>
           {alerts.map((a, i) => (
-            <div key={i} className={`obj-alert-item obj-alert-${a.type}`}>
-              <IcoAlert size={12} /> {a.text}
+            <div key={i} className={`obj-alert-row obj-alert-row--${a.type}`}>
+              <IcoAlert size={11} /><span style={{ flex: 1 }}>{a.text}</span><IcoChevR size={10} />
             </div>
           ))}
         </div>
       )}
 
+      <RelatedBlock
+        title="Campagnes liées" icon={<IcoMega size={15} />} emptyText="Aucune campagne liée"
+        items={linkedProjects}
+        renderRow={pr => (
+          <>
+            <div style={{ width: 26, height: 26, borderRadius: 8, background: "rgba(15,86,184,.10)", color: "var(--ep-blue)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><IcoMega size={12} /></div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div className="obj-rel-name">{pr.title || pr.name}</div>
+              <div className="obj-rel-meta">{fmtShort(pr.date || pr.startDate)}</div>
+            </div>
+            <IcoChevR size={10} />
+          </>
+        )}
+      />
+
+      <RelatedBlock
+        title="Événements liés" icon={<IcoEvent size={15} />} emptyText="Aucun événement lié"
+        items={linkedEvents}
+        renderRow={ev => {
+          const club = resolveClub(ev.club, clubs);
+          return (
+            <>
+              <div className="obj-date-badge">
+                <span>{fmtShort(ev.date).split(" ")[0]}</span>
+                <span>{fmtShort(ev.date).split(" ")[1]}</span>
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="obj-rel-name">{ev.title}</div>
+                <div className="obj-rel-meta">{club?.name}</div>
+              </div>
+              <IcoChevR size={10} />
+            </>
+          );
+        }}
+      />
+
+      <RelatedBlock
+        title="Contenus liés" icon={<IcoLayers size={15} />} emptyText="Aucun contenu lié"
+        items={linkedPubs}
+        renderRow={pub => {
+          const s = (pub.status || pub.statut || "").toLowerCase();
+          const isPub = s.includes("publi"); const isPend = s.includes("valider") || s.includes("review");
+          const sp = isPub ? { bg: "var(--green-bg)", c: "var(--green)" } : isPend ? { bg: "var(--yellow-bg)", c: "#8a5c00" } : { bg: "var(--gray-bg)", c: "var(--text-3)" };
+          return (
+            <>
+              <div style={{ width: 26, height: 26, borderRadius: 8, background: "rgba(251,133,0,.10)", color: "#b05a00", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><IcoLayers size={12} /></div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="obj-rel-name">{pub.title}</div>
+                <div className="obj-rel-meta" style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                  {pub.platform}
+                  <Badge label={pub.status || "Brouillon"} bg={sp.bg} color={sp.c} />
+                </div>
+              </div>
+              <IcoChevR size={10} />
+            </>
+          );
+        }}
+      />
+
+      <RelatedBlock
+        title="Tâches liées" icon={<IcoCheck size={15} />} emptyText="Aucune tâche liée"
+        items={linkedTasks}
+        renderRow={t => {
+          const done = t.status === "Terminé" || t.status === "done";
+          return (
+            <>
+              <div style={{ width: 16, height: 16, borderRadius: 5, border: `1.5px solid ${done ? "var(--green)" : "var(--border-strong)"}`, background: done ? "var(--green)" : "transparent", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                {done && <IcoCheck size={9} />}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="obj-rel-name" style={{ textDecoration: done ? "line-through" : "none", color: done ? "var(--text-3)" : "var(--text)" }}>{t.title}</div>
+                {t.deadline && <div className="obj-rel-meta"><IcoCal size={10} /> {fmtShort(t.deadline)}</div>}
+              </div>
+              <IcoChevR size={10} />
+            </>
+          );
+        }}
+      />
+
+      {/* Historique */}
+      <div className="obj-block">
+        <div className="obj-block-header">Activité récente</div>
+        <EmptyRow icon={<IcoClock size={15} />} text="L'activité apparaîtra ici au fil des mises à jour." />
+      </div>
+    </>
+  );
+}
+
+/* ══════════════════════════════════════
+   PAGE DÉTAIL
+══════════════════════════════════════ */
+function ObjectifDetail({ obj, clubs, users, tasks, publications, events, projects, onBack }) {
+  const sc = statusColor(obj.status);
+  const club = resolveClub(obj.club, clubs);
+  const acc = clubAccentColor(club);
+
+  return (
+    <div className="obj-detail-page">
+      {/* Breadcrumb */}
+      <div className="obj-breadcrumb">
+        <button className="obj-back-btn" onClick={onBack}><IcoChevL size={12} /> Objectifs</button>
+        <IcoChevR size={10} />
+        <span style={{ color: "var(--text)", fontWeight: 600, fontSize: 12 }}>{obj.title}</span>
+      </div>
+
+      {/* Header */}
+      <div className="obj-detail-header">
+        <div className="obj-detail-header-left">
+          <div style={{ width: 48, height: 48, borderRadius: 15, background: `${acc}18`, color: acc, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <IcoTarget size={22} />
+          </div>
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 3 }}>
+              <h1 className="obj-detail-title">{obj.title}</h1>
+              <span style={{ width: 7, height: 7, borderRadius: "50%", background: sc.dot, flexShrink: 0 }} />
+              <Badge label={statusLabel(obj.status)} bg={sc.bg} color={sc.text} />
+            </div>
+            <p style={{ fontSize: 12, color: "var(--text-3)", margin: 0 }}>
+              {club?.name} · {fmtDate(obj.startDate)} → {fmtDate(obj.deadline)}
+            </p>
+          </div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+          <button className="obj-btn-edit"><IcoEdit size={13} /> Modifier</button>
+          <button className="obj-btn-more">···</button>
+        </div>
+      </div>
+
       {/* 3-col grid */}
       <div className="obj-detail-grid">
-
-        {/* ── COL GAUCHE ── */}
-        <div className="obj-detail-col obj-detail-col--left">
-
-          {/* Carte identité */}
-          <div className="obj-card-block">
-            <div className="obj-card-block-header">
-              <span className="obj-card-block-title">Identité de l'objectif</span>
-            </div>
-            <div className="obj-id-section">
-              <div className="obj-id-visual">
-                <div className="obj-id-icon" style={{ background: `${clubColor(obj.club)}18`, color: clubColor(obj.club) }}>
-                  <IcoTarget size={26} />
-                </div>
-                <div>
-                  <div className="obj-id-name">{obj.title}</div>
-                  <div style={{ display: "flex", gap: 5, marginTop: 5, flexWrap: "wrap" }}>
-                    <Badge label="Objectif comm." bg="var(--gray-bg)" color="var(--text-2)" />
-                    <Badge label="Priorité haute" bg="var(--yellow-bg)" color="#8a5c00" />
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="obj-info-list">
-              {[
-                { icon: <Ico d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" size={13} />, label: "Statut", value: <Badge label={statusLabel(obj.status)} bg={sc.bg} color={sc.text} /> },
-                { icon: <IcoUser size={13} />, label: "Responsable", value: userName(obj.owner, users) || "—" },
-                { icon: <IcoCalendar size={13} />, label: "Début", value: fmtDate(obj.startDate) },
-                { icon: <IcoCalendar size={13} />, label: "Échéance", value: fmtDate(obj.deadline) },
-                { icon: <IcoBarChart size={13} />, label: "Source métrique", value: obj.source || obj.metricKey || "—" },
-                { icon: <IcoClock size={13} />, label: "Dernière MAJ", value: obj.updatedAt ? fmtDate(obj.updatedAt) : fmtDate(obj.createdAt) },
-              ].map((row, i) => (
-                <div key={i} className="obj-info-row">
-                  <span className="obj-info-icon">{row.icon}</span>
-                  <span className="obj-info-label">{row.label}</span>
-                  <span className="obj-info-value">{row.value}</span>
-                </div>
-              ))}
-
-              <div className="obj-info-row">
-                <span className="obj-info-icon"><IcoLink size={13} /></span>
-                <span className="obj-info-label">Club</span>
-                <span className="obj-info-value">
-                  <span className="obj-club-chip" style={{ background: `${clubColor(obj.club)}18`, color: clubColor(obj.club), borderColor: `${clubColor(obj.club)}33` }}>
-                    {clubName(obj.club)}
-                  </span>
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Résultat attendu */}
-          <div className="obj-card-block obj-result-block">
-            <div className="obj-card-block-header">
-              <span className="obj-card-block-title">Résultat attendu</span>
-            </div>
-            <div className="obj-result-body">
-              {obj.target ? (
-                <div className="obj-result-metric">
-                  <span className="obj-result-value">{Number(obj.target).toLocaleString("fr-FR")}</span>
-                  <span className="obj-result-unit">{obj.unit || ""}</span>
-                </div>
-              ) : null}
-              <p className="obj-result-desc">
-                {obj.description || `Atteindre ${obj.target ? Number(obj.target).toLocaleString("fr-FR") : "la cible"} ${obj.unit || ""} d'ici le ${fmtDate(obj.deadline)} pour ${clubName(obj.club)}.`}
-              </p>
-              <div className="obj-result-from">
-                <span>Départ : <strong>{Number(obj.baseline || obj.current || 0).toLocaleString("fr-FR")} {obj.unit || ""}</strong></span>
-                {obj.target && <span>Cible : <strong>{Number(obj.target).toLocaleString("fr-FR")} {obj.unit || ""}</strong></span>}
-              </div>
-            </div>
-          </div>
-
+        <div className="obj-detail-col">
+          <DetailLeft obj={obj} clubs={clubs} users={users} />
         </div>
-
-        {/* ── COL CENTRALE ── */}
-        <div className="obj-detail-col obj-detail-col--center">
-
-          {/* Progression & indicateurs */}
-          <div className="obj-card-block">
-            <div className="obj-card-block-header">
-              <span className="obj-card-block-title">Progression & indicateurs</span>
-              <span className="obj-tab-pill">Vue globale</span>
-            </div>
-
-            {/* Gros chiffre progression */}
-            <div className="obj-big-progress">
-              <div className="obj-big-progress-ring">
-                <svg viewBox="0 0 80 80" width="80" height="80">
-                  <circle cx="40" cy="40" r="33" fill="none" stroke="#ECEAE5" strokeWidth="7" />
-                  <circle cx="40" cy="40" r="33" fill="none"
-                    stroke={p >= 80 ? "#1a7a38" : p >= 50 ? "#FEB601" : "#FB8500"}
-                    strokeWidth="7" strokeLinecap="round"
-                    strokeDasharray={`${2 * Math.PI * 33}`}
-                    strokeDashoffset={`${2 * Math.PI * 33 * (1 - p / 100)}`}
-                    transform="rotate(-90 40 40)"
-                  />
-                </svg>
-                <span className="obj-big-progress-pct">{p}%</span>
-              </div>
-              <div className="obj-big-progress-info">
-                <div className="obj-big-progress-label">Avancement global</div>
-                <div className="obj-big-progress-vals">
-                  <span><strong>{Number(obj.current || 0).toLocaleString("fr-FR")}</strong> {obj.unit}</span>
-                  <span style={{ color: "var(--text-3)" }}>/ {Number(obj.target || 0).toLocaleString("fr-FR")} {obj.unit}</span>
-                </div>
-                {dl !== null && (
-                  <div style={{ fontSize: 11, color: dl <= 14 ? "#b05a00" : "var(--text-3)", marginTop: 4 }}>
-                    <IcoClock size={11} /> {dl < 0 ? `${Math.abs(dl)}j de retard` : `${dl}j restants`}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* KPI rows */}
-            <div className="obj-kpi-list">
-              {MOCK_KPIS.map((kpi, i) => (
-                <KpiRow key={i} idx={i}
-                  label={kpi.label}
-                  value={kpi.isMock ? null : kpi.value}
-                  target={kpi.isMock ? "MOCK" : kpi.target}
-                  unit={kpi.unit}
-                />
-              ))}
-            </div>
-          </div>
-
-          {/* Graphique évolution */}
-          <div className="obj-card-block">
-            <div className="obj-card-block-header">
-              <span className="obj-card-block-title">Évolution de l'objectif</span>
-            </div>
-            <div className="obj-chart-empty">
-              <div className="obj-chart-empty-icon"><IcoBarChart size={22} /></div>
-              <div className="obj-chart-empty-text">Le graphique d'évolution apparaîtra dès que plusieurs points de progression auront été enregistrés.</div>
-            </div>
-          </div>
-
-          {/* Équipe */}
-          <div className="obj-card-block">
-            <div className="obj-card-block-header">
-              <span className="obj-card-block-title">Équipe & responsabilités</span>
-            </div>
-            {assignedUsers.length === 0 ? (
-              <EmptyState icon={<IcoUser size={20} />} text="Aucun membre assigné" />
-            ) : (
-              <div className="obj-team-list">
-                {assignedUsers.map((u, i) => {
-                  const name = u.firstName ? `${u.firstName} ${u.lastName || ""}`.trim() : u.name || "Membre";
-                  const isOwner = String(u.id) === String(obj.owner) || String(u.appId) === String(obj.owner);
-                  return (
-                    <div key={u.id || i} className="obj-team-row">
-                      <div className="obj-avatar" style={{ background: "#e0eaff", color: "#0F56B8" }}>{initials(name)}</div>
-                      <div className="obj-team-info">
-                        <div className="obj-team-name">{name}</div>
-                        <div className="obj-team-role">{u.role || "Contributeur"}</div>
-                      </div>
-                      {isOwner && <Badge label="Responsable" bg="var(--yellow-bg)" color="#8a5c00" />}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
+        <div className="obj-detail-col">
+          <DetailCenter obj={obj} users={users} tasks={tasks} />
         </div>
-
-        {/* ── COL DROITE ── */}
-        <div className="obj-detail-col obj-detail-col--right">
-
-          {/* Alertes */}
-          {alerts.length > 0 && (
-            <div className="obj-card-block obj-alerts-block">
-              <div className="obj-card-block-header">
-                <span className="obj-card-block-title">Alertes</span>
-                <span className="obj-alert-count">{alerts.length}</span>
-              </div>
-              {alerts.map((a, i) => (
-                <div key={i} className={`obj-alert-row obj-alert-row--${a.type}`}>
-                  <IcoAlert size={12} />
-                  <span>{a.text}</span>
-                  <IcoChevRight size={11} />
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Campagnes liées */}
-          <div className="obj-card-block">
-            <div className="obj-card-block-header">
-              <span className="obj-card-block-title">Campagnes liées</span>
-              <button className="obj-add-btn"><IcoPlus size={11} /></button>
-            </div>
-            {linkedProjects.length === 0 ? (
-              <EmptyState icon={<IcoMegaphone size={18} />} text="Aucune campagne liée" sub="Associez une campagne à cet objectif." />
-            ) : (
-              <div className="obj-related-list">
-                {linkedProjects.slice(0, 4).map((pr, i) => (
-                  <div key={i} className="obj-related-row">
-                    <div className="obj-related-icon" style={{ background: "rgba(15,86,184,.10)", color: "#0F56B8" }}><IcoMegaphone size={13} /></div>
-                    <div className="obj-related-info">
-                      <div className="obj-related-name">{pr.title || pr.name}</div>
-                      <div className="obj-related-meta">{fmtShort(pr.date || pr.startDate)}</div>
-                    </div>
-                    <IcoChevRight size={11} />
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Événements liés */}
-          <div className="obj-card-block">
-            <div className="obj-card-block-header">
-              <span className="obj-card-block-title">Événements liés</span>
-              <button className="obj-add-btn"><IcoPlus size={11} /></button>
-            </div>
-            {linkedEvents.length === 0 ? (
-              <EmptyState icon={<IcoEvent size={18} />} text="Aucun événement lié" />
-            ) : (
-              <div className="obj-related-list">
-                {linkedEvents.slice(0, 4).map((ev, i) => (
-                  <div key={i} className="obj-related-row">
-                    <div className="obj-related-date-badge">
-                      <span>{fmtShort(ev.date).split(" ")[0]}</span>
-                      <span>{fmtShort(ev.date).split(" ")[1]}</span>
-                    </div>
-                    <div className="obj-related-info">
-                      <div className="obj-related-name">{ev.title}</div>
-                      <div className="obj-related-meta">{clubName(ev.club)}</div>
-                    </div>
-                    <IcoChevRight size={11} />
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Contenus liés */}
-          <div className="obj-card-block">
-            <div className="obj-card-block-header">
-              <span className="obj-card-block-title">Contenus liés</span>
-              <button className="obj-add-btn"><IcoPlus size={11} /></button>
-            </div>
-            {linkedPubs.length === 0 ? (
-              <EmptyState icon={<IcoLayers size={18} />} text="Aucun contenu lié" />
-            ) : (
-              <div className="obj-related-list">
-                {linkedPubs.slice(0, 5).map((pub, i) => {
-                  const pubStatus = pub.status || pub.statut || "";
-                  const isPub = pubStatus.toLowerCase().includes("publi");
-                  const isPending = pubStatus.toLowerCase().includes("valider") || pubStatus.toLowerCase().includes("review");
-                  const statusPill = isPub ? { bg: "var(--green-bg)", color: "var(--green)" } : isPending ? { bg: "var(--yellow-bg)", color: "#8a5c00" } : { bg: "var(--gray-bg)", color: "var(--text-2)" };
-                  return (
-                    <div key={i} className="obj-related-row">
-                      <div className="obj-related-icon" style={{ background: "rgba(251,133,0,.10)", color: "#b05a00" }}><IcoLayers size={13} /></div>
-                      <div className="obj-related-info">
-                        <div className="obj-related-name">{pub.title}</div>
-                        <div className="obj-related-meta">{pub.platform} · <Badge label={pubStatus || "Brouillon"} bg={statusPill.bg} color={statusPill.color} /></div>
-                      </div>
-                      <IcoChevRight size={11} />
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          {/* Tâches liées */}
-          <div className="obj-card-block">
-            <div className="obj-card-block-header">
-              <span className="obj-card-block-title">Tâches liées</span>
-              <button className="obj-add-btn"><IcoPlus size={11} /></button>
-            </div>
-            {linkedTasks.length === 0 ? (
-              <EmptyState icon={<Ico d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" size={18} />} text="Aucune tâche liée" />
-            ) : (
-              <div className="obj-related-list">
-                {linkedTasks.slice(0, 5).map((t, i) => {
-                  const done = t.status === "Terminé" || t.status === "done";
-                  return (
-                    <div key={i} className="obj-related-row">
-                      <div className={`obj-task-check${done ? " done" : ""}`}>
-                        {done && <IcoCheck size={9} />}
-                      </div>
-                      <div className="obj-related-info">
-                        <div className="obj-related-name" style={{ textDecoration: done ? "line-through" : "none", color: done ? "var(--text-3)" : "var(--text)" }}>{t.title}</div>
-                        {t.deadline && <div className="obj-related-meta"><IcoCalendar size={10} /> {fmtShort(t.deadline)}</div>}
-                      </div>
-                      <IcoChevRight size={11} />
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          {/* Historique */}
-          <div className="obj-card-block">
-            <div className="obj-card-block-header">
-              <span className="obj-card-block-title">Historique</span>
-            </div>
-            <EmptyState
-              icon={<IcoClock size={18} />}
-              text="Aucun historique disponible"
-              sub="L'activité apparaîtra ici au fil des mises à jour."
-            />
-          </div>
-
+        <div className="obj-detail-col">
+          <DetailRight obj={obj} clubs={clubs} tasks={tasks} publications={publications} events={events} projects={projects} />
         </div>
       </div>
     </div>
   );
 }
 
-/* ════════════════════════════════════════
-   EXPORT PRINCIPAL
-════════════════════════════════════════ */
+/* ══════════════════════════════════════
+   ROOT
+══════════════════════════════════════ */
 export default function ObjectifsV2({ appId, currentUser, onNavigate }) {
-  const { objectives, loading: loadingObj } = useObjectives();
+  const { objectives, loading } = useObjectives();
   const { users } = useUsers();
+  const { clubs } = useClubs();
   const { tasks } = useTasks();
   const { publications } = usePublications();
   const { events } = useCalendarEvents();
   const { projects } = useProjects();
-
   const [selected, setSelected] = useState(null);
 
-  if (loadingObj) {
+  if (loading) {
     return (
-      <div className="obj-loading">
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 12, padding: 60, color: "var(--text-3)", fontSize: 13 }}>
         <div className="v2-spinner" />
         <span>Chargement des objectifs…</span>
       </div>
@@ -812,12 +905,9 @@ export default function ObjectifsV2({ appId, currentUser, onNavigate }) {
   if (selected) {
     return (
       <ObjectifDetail
-        obj={selected}
-        users={users}
-        tasks={tasks}
-        publications={publications}
-        events={events}
-        projects={projects}
+        obj={selected} clubs={clubs} users={users}
+        tasks={tasks} publications={publications}
+        events={events} projects={projects}
         onBack={() => setSelected(null)}
       />
     );
@@ -825,8 +915,7 @@ export default function ObjectifsV2({ appId, currentUser, onNavigate }) {
 
   return (
     <ObjectifsList
-      objectives={objectives}
-      users={users}
+      objectives={objectives} clubs={clubs} users={users} tasks={tasks}
       onSelect={setSelected}
     />
   );
