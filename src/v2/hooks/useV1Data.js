@@ -84,6 +84,11 @@ export function useCampagnes() {
   return { campagnes: data || [], loading };
 }
 
+export function useRessources() {
+  const { data, loading } = useFirestoreRead("ep:ressources");
+  return { ressources: data || [], loading };
+}
+
 export function useCalendarEvents() {
   const { data, loading } = useFirestoreRead("ep:events");
   return { events: data || [], loading };

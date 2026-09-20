@@ -17,6 +17,7 @@ import ObjectifsV2 from "./pages/ObjectifsV2";
 import CalendrierV2 from "./pages/CalendrierV2";
 import DemandesV2 from "./pages/DemandesV2";
 import CampagnesV2 from "./pages/CampagnesV2";
+import RessourcesV2 from "./pages/RessourcesV2";
 import PlaceholderPage from "./pages/PlaceholderPage";
 import { useUsers } from "./hooks/useV1Data";
 import { useRequests, filterOpenRequests } from "./hooks/useV1Data";
@@ -244,6 +245,14 @@ export default function AppV2() {
           currentUser={currentUser}
           onNavigate={setCurrentPage}
           initialSelectedId={selectedCampagneId}
+        />
+      );
+    }
+    if (currentPage === "ressources") {
+      return (
+        <RessourcesV2
+          appId={appId}
+          currentUser={currentUser}
         />
       );
     }

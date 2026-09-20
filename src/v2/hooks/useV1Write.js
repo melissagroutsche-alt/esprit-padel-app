@@ -1,17 +1,18 @@
 /**
  * useV1Write — helpers d'écriture pour les collections Firestore V1.
- * Cible exclusive : appdata/ep:campagnes
+ * Cibles : appdata/ep:campagnes, appdata/ep:ressources
  * Structure V1 : { value: [...], updatedAt: Date.now() }
  *
  * Toutes les modifications partent de l'objet existant complet via spread
  * pour ne jamais détruire un champ non édité par V2.
  *
- * Pas de Storage dans cette passe. Pas de suppression.
+ * Pas de Storage dans cette passe. Pas de suppression définitive.
  */
 import { doc, setDoc } from "firebase/firestore";
 import { db } from "../../firebase";
 
-const EP_CAMPAGNES = "ep:campagnes";
+const EP_CAMPAGNES  = "ep:campagnes";
+const EP_RESSOURCES = "ep:ressources";
 
 function uid() {
   return String(Date.now()) + String(Math.random()).slice(2, 8);
@@ -165,6 +166,122 @@ export async function togglePublished(campagnes, id) {
   const updated = { ...existing, published: !existing.published };
   const newArray = campagnes.map(c => String(c.id) === String(id) ? updated : c);
   await setDoc(doc(db, "appdata", EP_CAMPAGNES), {
+    value: newArray,
+    updatedAt: Date.now(),
+  });
+}
+
+// ─── ep:ressources ────────────────────────────────────────────────────────
+
+const MAX_HISTORY = 10;
+
+function addHistory(existing, action, appId) {
+  const entry = { at: new Date().toISOString(), by: appId, action };
+  const prev = Array.isArray(existing.history) ? existing.history : [];
+  return [entry, ...prev].slice(0, MAX_HISTORY);
+}
+
+/**
+ * Crée une nouvelle ressource numérique (lien ou Canva).
+ * Pas d'upload Firebase Storage dans cette passe.
+ */
+export async function createRessource(ressources, formData, appId) {
+  const newId = String(Date.now()) + String(Math.random()).slice(2, 8);
+  const now   = new Date().toISOString();
+  const newRessource = {
+    name: "",
+    type: "link",
+    url: null,
+    externalUrl: null,
+    storagePath: null,
+    thumbnail: null,
+    size: 0,
+    mimeType: null,
+    category: "autre",
+    tags: [],
+    documentDate: null,
+    season: null,
+    description: "",
+    campagneIds: [],
+    eventIds: [],
+    clubs: [],
+    published: false,
+    archived: false,
+    history: [],
+    ...formData,
+    // Champs système — toujours forcés après spread
+    id: newId,
+    uploadedBy: appId,
+    createdAt: now,
+    updatedAt: now,
+    archived: false,
+  };
+  newRessource.history = [{ at: now, by: appId, action: "created" }];
+  const newArray = [...ressources, newRessource];
+  await setDoc(doc(db, "appdata", EP_RESSOURCES), {
+    value: newArray,
+    updatedAt: Date.now(),
+  });
+  return newId;
+}
+
+/**
+ * Modifie une ressource existante.
+ * Spread de l'objet existant pour préserver les champs inconnus.
+ */
+export async function updateRessource(ressources, id, patch, appId) {
+  const existing = ressources.find(r => String(r.id) === String(id));
+  if (!existing) throw new Error(`Ressource introuvable : ${id}`);
+  const updated = {
+    ...existing,
+    ...patch,
+    id: existing.id,
+    uploadedBy: existing.uploadedBy,
+    createdAt: existing.createdAt,
+    updatedAt: new Date().toISOString(),
+    history: addHistory(existing, "updated", appId),
+  };
+  const newArray = ressources.map(r => String(r.id) === String(id) ? updated : r);
+  await setDoc(doc(db, "appdata", EP_RESSOURCES), {
+    value: newArray,
+    updatedAt: Date.now(),
+  });
+}
+
+/**
+ * Bascule published d'une ressource.
+ */
+export async function toggleRessourcePublished(ressources, id, appId) {
+  const existing = ressources.find(r => String(r.id) === String(id));
+  if (!existing) throw new Error(`Ressource introuvable : ${id}`);
+  const action = existing.published ? "unpublished" : "published";
+  const updated = {
+    ...existing,
+    published: !existing.published,
+    updatedAt: new Date().toISOString(),
+    history: addHistory(existing, action, appId),
+  };
+  const newArray = ressources.map(r => String(r.id) === String(id) ? updated : r);
+  await setDoc(doc(db, "appdata", EP_RESSOURCES), {
+    value: newArray,
+    updatedAt: Date.now(),
+  });
+}
+
+/**
+ * Archive ou désarchive une ressource.
+ */
+export async function archiveRessource(ressources, id, archive, appId) {
+  const existing = ressources.find(r => String(r.id) === String(id));
+  if (!existing) throw new Error(`Ressource introuvable : ${id}`);
+  const updated = {
+    ...existing,
+    archived: archive,
+    updatedAt: new Date().toISOString(),
+    history: addHistory(existing, archive ? "archived" : "unarchived", appId),
+  };
+  const newArray = ressources.map(r => String(r.id) === String(id) ? updated : r);
+  await setDoc(doc(db, "appdata", EP_RESSOURCES), {
     value: newArray,
     updatedAt: Date.now(),
   });
