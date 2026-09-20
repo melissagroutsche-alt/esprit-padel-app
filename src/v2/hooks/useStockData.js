@@ -82,8 +82,7 @@ function useCollection(collName, constraints = []) {
         unsubRef.current = null;
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [collName]);
+  }, [collName]); // constraints intentionnellement exclu — recalculé par le parent à chaque render
 
   return { data, loading, error };
 }

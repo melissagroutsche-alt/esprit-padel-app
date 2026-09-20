@@ -13,7 +13,7 @@
  *   cockpit     — page d'accueil : 4 catégories + récents + par campagne + accès rapides
  *   bibliotheque — recherche & classement complet
  */
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useCallback } from "react";
 import {
   useRessources, useCampagnes, useCalendarEvents, useClubs,
 } from "../hooks/useV1Data";
@@ -21,6 +21,8 @@ import {
   createRessource, updateRessource,
   toggleRessourcePublished, archiveRessource,
 } from "../hooks/useV1Write";
+import { useStockItems } from "../hooks/useStockData";
+import { createStockItem, updateStockItem } from "../hooks/useStockWrite";
 import {
   IconFolder, IconSearch, IconPlus, IconX, IconExternalLink,
   IconChevronRight, IconSettings, IconLayers,
@@ -801,11 +803,10 @@ const CATEGORY_CARDS = [
     color: "#059669", bg: "#ECFDF5", border: "#A7F3D0",
     icon: <IconBox size={22} />,
     bucketId: "stocks",
-    soon: true,
   },
 ];
 
-function CockpitView({ visibleRessources, allRessources, campagnes, clubs, isAdmin, loading, onShowBibliotheque, onSelectRessource, onAdd }) {
+function CockpitView({ visibleRessources, allRessources, campagnes, clubs, isAdmin, loading, onShowBibliotheque, onShowStocks, onSelectRessource, onAdd }) {
   const recent = useMemo(() =>
     [...visibleRessources]
       .filter(r => !r.archived)
@@ -838,10 +839,9 @@ function CockpitView({ visibleRessources, allRessources, campagnes, clubs, isAdm
         {CATEGORY_CARDS.map(cat => (
           <button
             key={cat.id}
-            className={`rsrc-cat-card${cat.soon ? " rsrc-cat-card--soon" : ""}`}
+            className="rsrc-cat-card"
             style={{ "--cat-color": cat.color, "--cat-bg": cat.bg, "--cat-border": cat.border }}
-            onClick={() => cat.soon ? null : onShowBibliotheque(cat.bucketId)}
-            disabled={cat.soon}
+            onClick={() => cat.id === "stocks" ? onShowStocks() : onShowBibliotheque(cat.bucketId)}
           >
             <div className="rsrc-cat-card__icon">{cat.icon}</div>
             <div className="rsrc-cat-card__body">
@@ -849,14 +849,7 @@ function CockpitView({ visibleRessources, allRessources, campagnes, clubs, isAdm
               <div className="rsrc-cat-card__desc">{cat.desc}</div>
             </div>
             <div className="rsrc-cat-card__footer">
-              {cat.soon ? (
-                <span className="rsrc-cat-card__soon-badge">Disponible en P3</span>
-              ) : (
-                <>
-                  <span className="rsrc-cat-card__count">{countCat(cat.bucketId)}</span>
-                  <span className="rsrc-cat-card__cta">Voir <IconArrowRight size={11} /></span>
-                </>
-              )}
+              <span className="rsrc-cat-card__cta">Voir <IconArrowRight size={11} /></span>
             </div>
           </button>
         ))}
@@ -956,26 +949,21 @@ function CockpitView({ visibleRessources, allRessources, campagnes, clubs, isAdm
           </div>
 
           {/* Stocks & matériel */}
-          <div className="rsrc-stocks-block">
+          <button className="rsrc-stocks-block rsrc-stocks-block--active" onClick={onShowStocks}>
             <div className="rsrc-stocks-block__header">
               <div className="rsrc-stocks-block__icon"><IconBox size={18} /></div>
               <div>
                 <div className="rsrc-stocks-block__title">Stocks & matériel</div>
-                <div className="rsrc-stocks-block__badge">Disponible en P3</div>
+                <div className="rsrc-stocks-block__badge rsrc-stocks-block__badge--live">Articles & variantes</div>
               </div>
             </div>
             <p className="rsrc-stocks-block__desc">
-              Gérez les stocks physiques liés à vos campagnes et événements — réceptions, mouvements, transferts et inventaires.
+              Articles physiques liés à vos campagnes et événements. Réceptions, mouvements et inventaires arrivent en P4–P6.
             </p>
-            <div className="rsrc-stocks-block__features">
-              {["Articles & variantes", "Réceptions fournisseurs", "Mouvements inter-clubs", "Inventaires"].map(f => (
-                <div key={f} className="rsrc-stocks-block__feature">
-                  <span className="rsrc-stocks-block__feature-dot" />
-                  {f}
-                </div>
-              ))}
+            <div className="rsrc-stocks-block__cta">
+              Ouvrir le module <IconArrowRight size={12} />
             </div>
-          </div>
+          </button>
         </div>
       </div>
     </div>
@@ -1126,6 +1114,814 @@ function BibliothequView({ visibleRessources, allRessources, campagnes, events, 
 }
 
 /* ─────────────────────────────────────
+   STOCKS VIEW — CONSTANTES
+───────────────────────────────────── */
+const STK_CATEGORIES = [
+  { value: "textile",       label: "Textile" },
+  { value: "équipement",    label: "Équipement" },
+  { value: "communication", label: "Communication" },
+  { value: "autre",         label: "Autre" },
+];
+const STK_UNITS = [
+  { value: "pièce",      label: "Pièce" },
+  { value: "lot",        label: "Lot" },
+  { value: "kg",         label: "kg" },
+  { value: "m",          label: "m" },
+  { value: "exemplaire", label: "Exemplaire" },
+];
+const STK_CAT_META = {
+  textile:       { color: "#0F56B8", bg: "#EFF6FF" },
+  équipement:    { color: "#059669", bg: "#ECFDF5" },
+  communication: { color: "#D97706", bg: "#FFFBEB" },
+  autre:         { color: "#58565e", bg: "#F0EEEA" },
+};
+function stkCatMeta(cat) { return STK_CAT_META[cat] || STK_CAT_META.autre; }
+
+function fmtPrice(n) {
+  if (n == null) return null;
+  return Number(n).toLocaleString("fr-FR", { style: "currency", currency: "EUR" });
+}
+function fmtRate(r) {
+  if (r == null) return null;
+  return (Number(r) * 100).toFixed(0) + " %";
+}
+
+function stkVarUid() {
+  return "v" + String(Date.now()) + String(Math.random()).slice(2, 8);
+}
+
+/* ─────────────────────────────────────
+   ARTICLE CARD (liste)
+───────────────────────────────────── */
+function ArticleCard({ item, campagnes, events, selected, onClick }) {
+  const camp  = campagnes.find(c => String(c.id) === String(item.campaignId));
+  const event = events.find(e => String(e.id) === String(item.eventId));
+  const catM  = stkCatMeta(item.category);
+  const activeVariants = (item.variants || []).filter(v => v.active !== false);
+  const prices = activeVariants
+    .map(v => v.salePriceTTC)
+    .filter(p => p != null)
+    .map(Number);
+  const priceRange = prices.length === 0 ? null
+    : prices.length === 1 ? fmtPrice(prices[0])
+    : `${fmtPrice(Math.min(...prices))} – ${fmtPrice(Math.max(...prices))}`;
+
+  return (
+    <button
+      className={`stk-card${selected ? " stk-card--selected" : ""}`}
+      onClick={() => onClick(item)}
+    >
+      <div className="stk-card__top">
+        <span className="stk-card__name">{item.name}</span>
+        <span className="stk-card__sku">{item.sku}</span>
+      </div>
+      <div className="stk-card__meta">
+        <span className="stk-card__cat" style={{ color: catM.color, background: catM.bg }}>
+          {item.category || "autre"}
+        </span>
+        {(camp || event) && (
+          <span className="stk-card__link">
+            {camp?.name || event?.title || "—"}
+          </span>
+        )}
+        {activeVariants.length > 0 && (
+          <span className="stk-card__variants">{activeVariants.length} variante{activeVariants.length > 1 ? "s" : ""}</span>
+        )}
+      </div>
+      {priceRange && <div className="stk-card__price">{priceRange}</div>}
+      {item.financialRule && (
+        <div className="stk-card__rule">
+          {item.financialRule.mode === "per_unit"
+            ? `Reversement : ${fmtPrice(item.financialRule.amountPerUnit)} / unité`
+            : `Reversement : ${fmtRate(item.financialRule.rate)} → ${item.financialRule.beneficiary}`}
+        </div>
+      )}
+    </button>
+  );
+}
+
+/* ─────────────────────────────────────
+   VARIANT ROW (dans ArticleDetail)
+───────────────────────────────────── */
+function VariantRow({ v, isAdmin, onEdit, onToggleActive }) {
+  const inactive = v.active === false;
+  return (
+    <div className={`stk-variant-row${inactive ? " stk-variant-row--inactive" : ""}`}>
+      <div className="stk-variant-row__label">{v.label || <em>Sans nom</em>}</div>
+      <div className="stk-variant-row__attrs">
+        {v.dimensions?.taille  && <span>{v.dimensions.taille}</span>}
+        {v.dimensions?.genre   && <span>{v.dimensions.genre}</span>}
+        {v.dimensions?.couleur && <span>{v.dimensions.couleur}</span>}
+        {v.dimensions?.modele  && <span>{v.dimensions.modele}</span>}
+        {v.dimensions?.annee   && <span>{v.dimensions.annee}</span>}
+        {Object.entries(v.dimensions?.custom || {}).map(([k, val]) => (
+          <span key={k}>{k}: {val}</span>
+        ))}
+      </div>
+      <div className="stk-variant-row__prices">
+        {v.purchasePriceHT != null && <span>Achat HT : {fmtPrice(v.purchasePriceHT)}</span>}
+        {v.salePriceTTC    != null && <span>Vente TTC : {fmtPrice(v.salePriceTTC)}</span>}
+        {v.alertThreshold  > 0     && <span>Seuil : {v.alertThreshold}</span>}
+      </div>
+      {isAdmin && (
+        <div className="stk-variant-row__actions">
+          <button className="stk-variant-btn" onClick={() => onEdit(v)}>Modifier</button>
+          <button className="stk-variant-btn stk-variant-btn--muted" onClick={() => onToggleActive(v)}>
+            {inactive ? "Réactiver" : "Désactiver"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────
+   VARIANT FORM (inline add/edit)
+───────────────────────────────────── */
+const EMPTY_DIMS = { taille: "", genre: "", couleur: "", modele: "", annee: "", custom: {} };
+const EMPTY_VARIANT = { id: null, label: "", dimensions: { ...EMPTY_DIMS }, purchasePriceHT: "", salePriceTTC: "", alertThreshold: "", active: true };
+
+function VariantForm({ initial, onSave, onCancel }) {
+  const [form, setForm] = useState(() => ({
+    ...EMPTY_VARIANT,
+    ...initial,
+    dimensions: { ...EMPTY_DIMS, ...(initial?.dimensions || {}) },
+  }));
+  const [customKey, setCustomKey] = useState("");
+  const [customVal, setCustomVal] = useState("");
+
+  const set    = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const setDim = (k, v) => setForm(f => ({ ...f, dimensions: { ...f.dimensions, [k]: v } }));
+
+  function addCustomDim() {
+    const k = customKey.trim();
+    if (!k) return;
+    setForm(f => ({ ...f, dimensions: { ...f.dimensions, custom: { ...(f.dimensions.custom || {}), [k]: customVal.trim() } } }));
+    setCustomKey(""); setCustomVal("");
+  }
+  function removeCustomDim(k) {
+    setForm(f => {
+      const { [k]: _, ...rest } = f.dimensions.custom || {};
+      return { ...f, dimensions: { ...f.dimensions, custom: rest } };
+    });
+  }
+
+  return (
+    <div className="stk-vform">
+      <div className="stk-vform__grid">
+        <div className="stk-vform__field">
+          <label>Nom / libellé *</label>
+          <input value={form.label} onChange={e => set("label", e.target.value)} placeholder="Ex : Taille M Bleu" />
+        </div>
+        <div className="stk-vform__field">
+          <label>Taille</label>
+          <input value={form.dimensions.taille} onChange={e => setDim("taille", e.target.value)} placeholder="XS / M / 42…" />
+        </div>
+        <div className="stk-vform__field">
+          <label>Genre</label>
+          <input value={form.dimensions.genre} onChange={e => setDim("genre", e.target.value)} placeholder="Homme / Femme / Mixte" />
+        </div>
+        <div className="stk-vform__field">
+          <label>Couleur</label>
+          <input value={form.dimensions.couleur} onChange={e => setDim("couleur", e.target.value)} placeholder="Bleu marine…" />
+        </div>
+        <div className="stk-vform__field">
+          <label>Modèle</label>
+          <input value={form.dimensions.modele} onChange={e => setDim("modele", e.target.value)} placeholder="Référence modèle" />
+        </div>
+        <div className="stk-vform__field">
+          <label>Année</label>
+          <input value={form.dimensions.annee || ""} onChange={e => setDim("annee", e.target.value)} placeholder="2026" maxLength={4} />
+        </div>
+        <div className="stk-vform__field">
+          <label>Prix achat HT (€)</label>
+          <input type="number" min="0" step="0.01" value={form.purchasePriceHT} onChange={e => set("purchasePriceHT", e.target.value)} placeholder="0.00" />
+        </div>
+        <div className="stk-vform__field">
+          <label>Prix vente TTC (€)</label>
+          <input type="number" min="0" step="0.01" value={form.salePriceTTC} onChange={e => set("salePriceTTC", e.target.value)} placeholder="0.00" />
+        </div>
+        <div className="stk-vform__field">
+          <label>Seuil d'alerte</label>
+          <input type="number" min="0" step="1" value={form.alertThreshold} onChange={e => set("alertThreshold", e.target.value)} placeholder="0" />
+        </div>
+      </div>
+      {/* Dimensions custom */}
+      <div className="stk-vform__dims">
+        <div className="stk-vform__dims-title">Dimensions personnalisées</div>
+        {Object.entries(form.dimensions.custom || {}).map(([k, v]) => (
+          <div key={k} className="stk-vform__dim-row">
+            <span className="stk-vform__dim-key">{k}</span>
+            <span className="stk-vform__dim-val">{v}</span>
+            <button className="stk-vform__dim-remove" onClick={() => removeCustomDim(k)}>×</button>
+          </div>
+        ))}
+        <div className="stk-vform__dim-add">
+          <input value={customKey} onChange={e => setCustomKey(e.target.value)} placeholder="Clé" />
+          <input value={customVal} onChange={e => setCustomVal(e.target.value)} placeholder="Valeur" />
+          <button onClick={addCustomDim} className="stk-vform__dim-btn">+</button>
+        </div>
+      </div>
+      <div className="stk-vform__actions">
+        <button className="camp-btn camp-btn--ghost" onClick={onCancel}>Annuler</button>
+        <button className="camp-btn camp-btn--primary" onClick={() => onSave(form)}>
+          {form.id ? "Enregistrer" : "Ajouter la variante"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────
+   ARTICLE DETAIL (panneau latéral)
+───────────────────────────────────── */
+function ArticleDetail({ item, campagnes, events, isAdmin, appId, allItems, onClose, onUpdated, onEdit }) {
+  const [editingVariant,  setEditingVariant]  = useState(null);  // variant obj or {} for new
+  const [saving, setSaving] = useState(false);
+  const [err,    setErr]    = useState(null);
+
+  const camp  = campagnes.find(c => String(c.id) === String(item.campaignId));
+  const event = events.find(e => String(e.id) === String(item.eventId));
+  const catM  = stkCatMeta(item.category);
+  const variants = item.variants || [];
+
+  async function handleSaveVariant(vForm) {
+    setSaving(true); setErr(null);
+    try {
+      const isNew = !vForm.id;
+      const prepared = {
+        ...vForm,
+        id: vForm.id || stkVarUid(),
+        label: (vForm.label || "").trim(),
+        dimensions: {
+          taille:  (vForm.dimensions?.taille  || "").trim(),
+          genre:   (vForm.dimensions?.genre   || "").trim(),
+          couleur: (vForm.dimensions?.couleur || "").trim(),
+          modele:  (vForm.dimensions?.modele  || "").trim(),
+          annee:   vForm.dimensions?.annee   || null,
+          custom:  vForm.dimensions?.custom  || {},
+        },
+        purchasePriceHT: vForm.purchasePriceHT !== "" ? Number(vForm.purchasePriceHT) : null,
+        salePriceTTC:    vForm.salePriceTTC    !== "" ? Number(vForm.salePriceTTC)    : null,
+        alertThreshold:  vForm.alertThreshold  !== "" ? Number(vForm.alertThreshold)  : 0,
+        active: true,
+      };
+      const newVariants = isNew
+        ? [...variants, prepared]
+        : variants.map(v => v.id === prepared.id ? prepared : v);
+      await updateStockItem(item.id, { variants: newVariants }, appId);
+      setEditingVariant(null);
+      onUpdated();
+    } catch (e) { setErr(e.message); }
+    finally { setSaving(false); }
+  }
+
+  async function handleToggleActive(v) {
+    setSaving(true); setErr(null);
+    try {
+      const newVariants = variants.map(vv =>
+        vv.id === v.id ? { ...vv, active: v.active === false ? true : false } : vv
+      );
+      await updateStockItem(item.id, { variants: newVariants }, appId);
+      onUpdated();
+    } catch (e) { setErr(e.message); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <div className="stk-detail">
+      <div className="stk-detail__head">
+        <div className="stk-detail__identity">
+          <span className="stk-detail__name">{item.name}</span>
+          <span className="stk-detail__sku">{item.sku}</span>
+        </div>
+        <div className="stk-detail__head-actions">
+          {isAdmin && <button className="camp-btn camp-btn--outline camp-btn--sm" onClick={onEdit}>Modifier</button>}
+          <button className="rsrc-detail-panel__close" onClick={onClose}>
+            <IconX size={16} />
+          </button>
+        </div>
+      </div>
+
+      <div className="stk-detail__body">
+        {/* Catégorie & unité */}
+        <div className="stk-detail__row">
+          <span className="stk-detail__label">Catégorie</span>
+          <span className="stk-detail__val stk-detail__cat" style={{ color: catM.color, background: catM.bg }}>
+            {item.category || "autre"}
+          </span>
+        </div>
+        <div className="stk-detail__row">
+          <span className="stk-detail__label">Unité</span>
+          <span className="stk-detail__val">{item.unit || "pièce"}</span>
+        </div>
+
+        {/* Rattachement */}
+        <div className="stk-detail__section-title">Rattachement</div>
+        {camp  && <div className="stk-detail__row"><span className="stk-detail__label">Campagne</span><span className="stk-detail__val">{camp.name}</span></div>}
+        {event && <div className="stk-detail__row"><span className="stk-detail__label">Événement</span><span className="stk-detail__val">{event.title || event.name}</span></div>}
+        {!camp && !event && <div className="stk-detail__row"><span className="stk-detail__val stk-detail__val--muted">Aucun rattachement renseigné</span></div>}
+
+        {/* Notes */}
+        {item.notes && (
+          <>
+            <div className="stk-detail__section-title">Notes</div>
+            <p className="stk-detail__notes">{item.notes}</p>
+          </>
+        )}
+
+        {/* Règle financière */}
+        {item.financialRule && (
+          <>
+            <div className="stk-detail__section-title">Règle financière</div>
+            <div className="stk-detail__rule-block">
+              {item.financialRule.mode === "per_unit" ? (
+                <span>{fmtPrice(item.financialRule.amountPerUnit)} par unité → {item.financialRule.beneficiary}</span>
+              ) : (
+                <span>{fmtRate(item.financialRule.rate)} du prix vente → {item.financialRule.beneficiary}</span>
+              )}
+            </div>
+          </>
+        )}
+
+        {/* Variantes */}
+        <div className="stk-detail__section-title">
+          Variantes
+          {isAdmin && !editingVariant && (
+            <button className="stk-detail__add-variant" onClick={() => setEditingVariant({ id: null })}>
+              <IconPlus size={12} /> Ajouter
+            </button>
+          )}
+        </div>
+
+        {err && <div className="stk-error">{err}</div>}
+
+        {editingVariant !== null && (
+          <VariantForm
+            initial={editingVariant.id ? editingVariant : {}}
+            onSave={handleSaveVariant}
+            onCancel={() => { setEditingVariant(null); setErr(null); }}
+          />
+        )}
+
+        {variants.length === 0 && !editingVariant ? (
+          <div className="stk-detail__empty">Aucune variante. {isAdmin && "Ajoutez-en une ci-dessus."}</div>
+        ) : (
+          <div className="stk-variant-list">
+            {variants.map(v => (
+              <VariantRow
+                key={v.id}
+                v={v}
+                isAdmin={isAdmin && !editingVariant}
+                onEdit={vv => setEditingVariant(vv)}
+                onToggleActive={handleToggleActive}
+              />
+            ))}
+          </div>
+        )}
+
+        {/* Prochaines étapes */}
+        <div className="stk-detail__section-title">Prochaines étapes</div>
+        <div className="stk-upcoming-list">
+          {[
+            { label: "Réceptions fournisseurs", phase: "P4" },
+            { label: "Mouvements & transferts", phase: "P5" },
+            { label: "Inventaires",              phase: "P6" },
+          ].map(s => (
+            <div key={s.label} className="stk-upcoming-item">
+              <span className="stk-upcoming-item__dot" />
+              <span className="stk-upcoming-item__label">{s.label}</span>
+              <span className="stk-upcoming-item__phase">{s.phase}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────
+   ARTICLE CREATION / EDIT PANEL
+───────────────────────────────────── */
+const EMPTY_ITEM_FORM = {
+  name: "", sku: "", category: "autre", unit: "pièce",
+  campaignId: "", eventId: "", notes: "",
+  financialRule: null,
+  variants: [],
+};
+
+function ArticlePanel({ initial, allItems, campagnes, events, appId, onClose, onSaved, editMode }) {
+  const [form,       setForm]    = useState(() => ({ ...EMPTY_ITEM_FORM, ...(initial || {}) }));
+  const [saving,     setSaving]  = useState(false);
+  const [err,        setErr]     = useState(null);
+  const [showFin,    setShowFin] = useState(() => !!(initial?.financialRule));
+  const [editingVar, setEditingVar] = useState(null);
+
+  const setField = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const setFin   = (k, v) => setForm(f => ({
+    ...f,
+    financialRule: { ...(f.financialRule || { mode: "per_unit", currency: "EUR", beneficiary: "" }), [k]: v }
+  }));
+
+  function addVariant(vForm) {
+    const prepared = {
+      ...vForm,
+      id: vForm.id || stkVarUid(),
+      dimensions: {
+        taille:  (vForm.dimensions?.taille  || "").trim(),
+        genre:   (vForm.dimensions?.genre   || "").trim(),
+        couleur: (vForm.dimensions?.couleur || "").trim(),
+        modele:  (vForm.dimensions?.modele  || "").trim(),
+        annee:   vForm.dimensions?.annee   || null,
+        custom:  vForm.dimensions?.custom  || {},
+      },
+      purchasePriceHT: vForm.purchasePriceHT !== "" ? Number(vForm.purchasePriceHT) : null,
+      salePriceTTC:    vForm.salePriceTTC    !== "" ? Number(vForm.salePriceTTC)    : null,
+      alertThreshold:  vForm.alertThreshold  !== "" ? Number(vForm.alertThreshold)  : 0,
+      active: true,
+    };
+    setForm(f => ({
+      ...f,
+      variants: f.variants.some(v => v.id === prepared.id)
+        ? f.variants.map(v => v.id === prepared.id ? prepared : v)
+        : [...f.variants, prepared],
+    }));
+    setEditingVar(null);
+  }
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setSaving(true); setErr(null);
+    try {
+      const payload = {
+        ...form,
+        financialRule: showFin && form.financialRule?.mode ? form.financialRule : null,
+      };
+      if (editMode) {
+        await updateStockItem(initial.id, payload, appId);
+      } else {
+        await createStockItem(allItems, payload, appId);
+      }
+      onSaved();
+    } catch (e) { setErr(e.message); }
+    finally { setSaving(false); }
+  }
+
+  const fin = form.financialRule || { mode: "per_unit", currency: "EUR", beneficiary: "", amount: "", rate: "" };
+
+  return (
+    <div className="stk-panel">
+      <div className="stk-panel__head">
+        <span className="stk-panel__title">{editMode ? "Modifier l'article" : "Nouvel article"}</span>
+        <button className="rsrc-detail-panel__close" onClick={onClose}><IconX size={16} /></button>
+      </div>
+      <form className="stk-panel__body" onSubmit={handleSubmit}>
+        {err && <div className="stk-error">{err}</div>}
+
+        <div className="stk-panel__section">Identité</div>
+        <div className="stk-panel__grid">
+          <div className="camp-form-group">
+            <label className="camp-form-label">Nom *</label>
+            <input className="camp-form-input" value={form.name} onChange={e => setField("name", e.target.value)} placeholder="Ex : T-shirt Octobre Rose" required />
+          </div>
+          <div className="camp-form-group">
+            <label className="camp-form-label">SKU / Référence *</label>
+            <input className="camp-form-input" value={form.sku} onChange={e => setField("sku", e.target.value.toUpperCase())} placeholder="EX : TSH-OCT-2026" required />
+          </div>
+          <div className="camp-form-group">
+            <label className="camp-form-label">Catégorie</label>
+            <select className="camp-form-input" value={form.category} onChange={e => setField("category", e.target.value)}>
+              {STK_CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+            </select>
+          </div>
+          <div className="camp-form-group">
+            <label className="camp-form-label">Unité</label>
+            <select className="camp-form-input" value={form.unit} onChange={e => setField("unit", e.target.value)}>
+              {STK_UNITS.map(u => <option key={u.value} value={u.value}>{u.label}</option>)}
+            </select>
+          </div>
+        </div>
+
+        <div className="stk-panel__section">Rattachement *</div>
+        <p className="stk-panel__hint">Au moins une campagne ou un événement est obligatoire.</p>
+        <div className="stk-panel__grid">
+          <div className="camp-form-group">
+            <label className="camp-form-label">Campagne</label>
+            <select className="camp-form-input" value={form.campaignId} onChange={e => setField("campaignId", e.target.value)}>
+              <option value="">— Aucune —</option>
+              {campagnes.filter(c => c.name).map(c => (
+                <option key={c.id} value={String(c.id)}>{c.name}</option>
+              ))}
+            </select>
+          </div>
+          <div className="camp-form-group">
+            <label className="camp-form-label">Événement</label>
+            <select className="camp-form-input" value={form.eventId} onChange={e => setField("eventId", e.target.value)}>
+              <option value="">— Aucun —</option>
+              {events.filter(ev => ev.title || ev.name).map(ev => (
+                <option key={ev.id} value={String(ev.id)}>{ev.title || ev.name}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        <div className="camp-form-group">
+          <label className="camp-form-label">Notes</label>
+          <textarea className="camp-form-input camp-form-textarea" value={form.notes} onChange={e => setField("notes", e.target.value)} rows={2} placeholder="Contexte, fournisseur, spécifications…" />
+        </div>
+
+        {/* Règle financière */}
+        <div className="stk-panel__section">
+          <button type="button" className="stk-panel__toggle" onClick={() => setShowFin(s => !s)}>
+            {showFin ? "▾" : "▸"} Règle de reversement (optionnel)
+          </button>
+        </div>
+        {showFin && (
+          <div className="stk-panel__grid">
+            <div className="camp-form-group">
+              <label className="camp-form-label">Mode</label>
+              <select className="camp-form-input" value={fin.mode} onChange={e => setFin("mode", e.target.value)}>
+                <option value="per_unit">Montant fixe par unité</option>
+                <option value="percentage">Pourcentage du prix vente</option>
+              </select>
+            </div>
+            {fin.mode === "per_unit" ? (
+              <div className="camp-form-group">
+                <label className="camp-form-label">Montant par unité (€)</label>
+                <input type="number" min="0" step="0.01" className="camp-form-input" value={fin.amountPerUnit ?? ""} onChange={e => setFin("amountPerUnit", e.target.value)} placeholder="0.00" />
+              </div>
+            ) : (
+              <div className="camp-form-group">
+                <label className="camp-form-label">Taux (%)</label>
+                <input type="number" min="0" max="100" step="0.1" className="camp-form-input"
+                  value={fin.rate != null ? (fin.rate <= 1 ? fin.rate * 100 : fin.rate) : ""}
+                  onChange={e => setFin("rate", e.target.value !== "" ? Number(e.target.value) / 100 : null)}
+                  placeholder="Ex : 10 pour 10 %" />
+              </div>
+            )}
+            <div className="camp-form-group">
+              <label className="camp-form-label">Bénéficiaire</label>
+              <input className="camp-form-input" value={fin.beneficiary || ""} onChange={e => setFin("beneficiary", e.target.value)} placeholder="Club, fournisseur…" />
+            </div>
+          </div>
+        )}
+
+        {/* Variantes */}
+        <div className="stk-panel__section">
+          Variantes
+          {!editingVar && (
+            <button type="button" className="stk-detail__add-variant" onClick={() => setEditingVar({})}>
+              <IconPlus size={12} /> Ajouter
+            </button>
+          )}
+        </div>
+        {editingVar !== null && (
+          <VariantForm
+            initial={editingVar}
+            onSave={addVariant}
+            onCancel={() => setEditingVar(null)}
+          />
+        )}
+        {form.variants.length === 0 && !editingVar && (
+          <div className="stk-detail__empty">Aucune variante pour l'instant — vous pourrez en ajouter après création.</div>
+        )}
+        {form.variants.map(v => (
+          <div key={v.id} className="stk-panel__var-summary">
+            <span>{v.label || <em>Sans nom</em>}</span>
+            {v.dimensions?.taille  && <span>{v.dimensions.taille}</span>}
+            {v.dimensions?.couleur && <span>{v.dimensions.couleur}</span>}
+            <button type="button" className="stk-variant-btn" onClick={() => setEditingVar(v)}>Modifier</button>
+            <button type="button" className="stk-variant-btn stk-variant-btn--muted" onClick={() => setForm(f => ({ ...f, variants: f.variants.filter(vv => vv.id !== v.id) }))}>
+              Supprimer
+            </button>
+          </div>
+        ))}
+
+        <div className="stk-panel__footer">
+          <button type="button" className="camp-btn camp-btn--ghost" onClick={onClose}>Annuler</button>
+          <button type="submit" className="camp-btn camp-btn--primary" disabled={saving}>
+            {saving ? <span className="v2-spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> : (editMode ? "Enregistrer" : "Créer l'article")}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────
+   STOCKS VIEW (page principale)
+───────────────────────────────────── */
+function StocksView({ currentUser, appId, campagnes, events, onBack }) {
+  const isAdmin = currentUser?.admin === true;
+  const { items, loading, error } = useStockItems();
+
+  const [search,       setSearch]      = useState("");
+  const [filterCamp,   setFilterCamp]  = useState("");
+  const [filterEvent,  setFilterEvent] = useState("");
+  const [filterCat,    setFilterCat]   = useState("");
+  const [selectedId,   setSelectedId]  = useState(null);
+  const [showCreate,   setShowCreate]  = useState(false);
+  const [editItem,     setEditItem]    = useState(null);
+  const [refreshKey,   setRefreshKey]  = useState(0);
+
+  function handleUpdated() { setRefreshKey(k => k + 1); }
+
+  const selectedItem = useMemo(() =>
+    items.find(i => i.id === selectedId) || null
+  , [items, selectedId, refreshKey]);
+
+  const filtered = useMemo(() => {
+    let res = items;
+    if (filterCamp)  res = res.filter(i => String(i.campaignId) === filterCamp);
+    if (filterEvent) res = res.filter(i => String(i.eventId) === filterEvent);
+    if (filterCat)   res = res.filter(i => i.category === filterCat);
+    if (search) {
+      const q = strSearch(search);
+      res = res.filter(i =>
+        strSearch(i.name).includes(q) ||
+        strSearch(i.sku).includes(q)
+      );
+    }
+    return res;
+  }, [items, filterCamp, filterEvent, filterCat, search, refreshKey]);
+
+  const kpiArticles = items.length;
+  const kpiVariants = items.reduce((s, i) => s + (i.variants?.filter(v => v.active !== false).length || 0), 0);
+  const kpiLinks    = new Set([
+    ...items.map(i => i.campaignId).filter(Boolean),
+    ...items.map(i => i.eventId).filter(Boolean),
+  ]).size;
+
+  // Campagnes et événements présents dans les items
+  const campPresents  = useMemo(() => {
+    const ids = new Set(items.map(i => i.campaignId).filter(Boolean).map(String));
+    return campagnes.filter(c => ids.has(String(c.id)) && c.name);
+  }, [items, campagnes]);
+  const eventPresents = useMemo(() => {
+    const ids = new Set(items.map(i => i.eventId).filter(Boolean).map(String));
+    return events.filter(e => ids.has(String(e.id)) && (e.title || e.name));
+  }, [items, events]);
+
+  return (
+    <div className="stk-page">
+      {/* ── Header ── */}
+      <div className="stk-header">
+        <div className="stk-header__left">
+          <button className="stk-back-btn" onClick={onBack}>
+            <IconChevronRight size={13} style={{ transform: "rotate(180deg)" }} />
+            Ressources
+          </button>
+          <div>
+            <h2 className="stk-header__title">Stocks & matériel</h2>
+            <p className="stk-header__sub">Ressources physiques liées aux campagnes et événements</p>
+          </div>
+        </div>
+        {isAdmin && (
+          <button className="camp-btn camp-btn--primary" onClick={() => setShowCreate(true)}>
+            <IconPlus size={14} /> Nouvel article
+          </button>
+        )}
+      </div>
+
+      {/* ── KPI ── */}
+      <div className="stk-kpi-row">
+        <div className="stk-kpi">
+          <div className="stk-kpi__val">{loading ? "…" : kpiArticles}</div>
+          <div className="stk-kpi__label">Articles</div>
+        </div>
+        <div className="stk-kpi">
+          <div className="stk-kpi__val">{loading ? "…" : kpiVariants}</div>
+          <div className="stk-kpi__label">Variantes actives</div>
+        </div>
+        <div className="stk-kpi">
+          <div className="stk-kpi__val">{loading ? "…" : kpiLinks}</div>
+          <div className="stk-kpi__label">Campagnes / événements</div>
+        </div>
+        <div className="stk-kpi stk-kpi--na">
+          <div className="stk-kpi__val">—</div>
+          <div className="stk-kpi__label">Alertes stock</div>
+          <div className="stk-kpi__hint">Disponible en P4</div>
+        </div>
+      </div>
+
+      {/* ── Contenu : liste + détail ── */}
+      <div className="stk-content">
+        {/* Colonne liste */}
+        <div className="stk-list-col">
+          {/* Filtres */}
+          <div className="stk-filters">
+            <div className="rsrc-search-wrap" style={{ flex: 1 }}>
+              <IconSearch size={13} className="rsrc-search-icon" />
+              <input className="rsrc-search" placeholder="Rechercher un article…"
+                value={search} onChange={e => setSearch(e.target.value)} />
+            </div>
+            <select className="stk-filter-sel" value={filterCamp} onChange={e => setFilterCamp(e.target.value)}>
+              <option value="">Toutes campagnes</option>
+              {campPresents.map(c => <option key={c.id} value={String(c.id)}>{c.name}</option>)}
+            </select>
+            <select className="stk-filter-sel" value={filterEvent} onChange={e => setFilterEvent(e.target.value)}>
+              <option value="">Tous événements</option>
+              {eventPresents.map(ev => <option key={ev.id} value={String(ev.id)}>{ev.title || ev.name}</option>)}
+            </select>
+            <select className="stk-filter-sel" value={filterCat} onChange={e => setFilterCat(e.target.value)}>
+              <option value="">Toutes catégories</option>
+              {STK_CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+            </select>
+          </div>
+
+          {/* Liste */}
+          {loading ? (
+            <div className="stk-loading"><div className="v2-spinner" /></div>
+          ) : error ? (
+            <div className="stk-error">Erreur de chargement : {error.message}</div>
+          ) : filtered.length === 0 ? (
+            <div className="stk-empty">
+              <IconFolder size={28} />
+              <span>{items.length === 0
+                ? (isAdmin ? "Aucun article. Créez votre premier article avec le bouton ci-dessus." : "Aucun article pour l'instant.")
+                : "Aucun résultat pour ces filtres."}</span>
+            </div>
+          ) : (
+            <div className="stk-cards">
+              {filtered.map(item => (
+                <ArticleCard
+                  key={item.id}
+                  item={item}
+                  campagnes={campagnes}
+                  events={events}
+                  selected={selectedId === item.id}
+                  onClick={i => { setSelectedId(i.id); setEditItem(null); }}
+                />
+              ))}
+            </div>
+          )}
+
+          {/* Prochaines étapes P4-P6 */}
+          {!loading && (
+            <div className="stk-upcoming-row">
+              {[
+                { label: "Réceptions fournisseurs", desc: "Saisir et valider les réceptions de matériel.", phase: "P4" },
+                { label: "Mouvements & transferts",  desc: "Déplacements inter-clubs, sorties de stock.",   phase: "P5" },
+                { label: "Inventaires",               desc: "Comptage et ajustement des niveaux réels.",     phase: "P6" },
+              ].map(s => (
+                <div key={s.label} className="stk-upcoming-card">
+                  <div className="stk-upcoming-card__top">
+                    <span className="stk-upcoming-card__label">{s.label}</span>
+                    <span className="stk-upcoming-card__phase">{s.phase}</span>
+                  </div>
+                  <p className="stk-upcoming-card__desc">{s.desc}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Panneau détail article */}
+        {selectedItem && !editItem && (
+          <ArticleDetail
+            item={selectedItem}
+            campagnes={campagnes}
+            events={events}
+            isAdmin={isAdmin}
+            appId={appId}
+            allItems={items}
+            onClose={() => setSelectedId(null)}
+            onUpdated={handleUpdated}
+            onEdit={() => setEditItem(selectedItem)}
+          />
+        )}
+
+        {/* Panneau édition article */}
+        {editItem && isAdmin && (
+          <ArticlePanel
+            initial={editItem}
+            allItems={items}
+            campagnes={campagnes}
+            events={events}
+            appId={appId}
+            editMode
+            onClose={() => setEditItem(null)}
+            onSaved={() => { handleUpdated(); setEditItem(null); }}
+          />
+        )}
+      </div>
+
+      {/* Panneau création */}
+      {showCreate && isAdmin && (
+        <ArticlePanel
+          allItems={items}
+          campagnes={campagnes}
+          events={events}
+          appId={appId}
+          onClose={() => setShowCreate(false)}
+          onSaved={() => { handleUpdated(); setShowCreate(false); }}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────
    PAGE PRINCIPALE
 ───────────────────────────────────── */
 export default function RessourcesV2({ currentUser, appId }) {
@@ -1136,7 +1932,7 @@ export default function RessourcesV2({ currentUser, appId }) {
   const { events }      = useCalendarEvents();
   const { clubs }       = useClubs();
 
-  const [mode,          setMode]         = useState("cockpit");   // "cockpit" | "bibliotheque"
+  const [mode,          setMode]         = useState("cockpit");   // "cockpit" | "bibliotheque" | "stocks"
   const [initialBucket, setInitialBucket] = useState("all");
   const [search,        setSearch]        = useState("");
   const [selectedId,    setSelectedId]    = useState(null);
@@ -1158,6 +1954,11 @@ export default function RessourcesV2({ currentUser, appId }) {
   function handleShowBibliotheque(bucketId = "all") {
     setInitialBucket(bucketId);
     setMode("bibliotheque");
+    setSelectedId(null);
+  }
+
+  function handleShowStocks() {
+    setMode("stocks");
     setSelectedId(null);
   }
 
@@ -1203,8 +2004,17 @@ export default function RessourcesV2({ currentUser, appId }) {
             isAdmin={isAdmin}
             loading={loading}
             onShowBibliotheque={handleShowBibliotheque}
+            onShowStocks={handleShowStocks}
             onSelectRessource={handleSelectRessource}
             onAdd={() => setShowCreate(true)}
+          />
+        ) : mode === "stocks" ? (
+          <StocksView
+            currentUser={currentUser}
+            appId={appId}
+            campagnes={campagnes}
+            events={events}
+            onBack={() => setMode("cockpit")}
           />
         ) : (
           <BibliothequView
