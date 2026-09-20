@@ -94,6 +94,16 @@ export function useClubs() {
   return { clubs: data || [], loading };
 }
 
+export function useMeetings() {
+  const { data, loading } = useFirestoreRead("ep:meetings");
+  return { meetings: data || [], loading };
+}
+
+export function useMetricool() {
+  const { data, loading } = useFirestoreRead("ep:metricool-approvals");
+  return { metricool: data || null, loading };
+}
+
 /* ── Helpers ── */
 
 /**

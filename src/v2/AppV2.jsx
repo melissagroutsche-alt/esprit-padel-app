@@ -14,6 +14,7 @@ import { loginUser } from "../auth/authService";
 import AppShell from "./layout/AppShell";
 import DashboardV2 from "./pages/DashboardV2";
 import ObjectifsV2 from "./pages/ObjectifsV2";
+import CalendrierV2 from "./pages/CalendrierV2";
 import PlaceholderPage from "./pages/PlaceholderPage";
 import { useUsers } from "./hooks/useV1Data";
 import { useRequests, filterOpenRequests } from "./hooks/useV1Data";
@@ -205,6 +206,15 @@ export default function AppV2() {
     if (currentPage === "objectifs") {
       return (
         <ObjectifsV2
+          appId={appId}
+          currentUser={currentUser}
+          onNavigate={setCurrentPage}
+        />
+      );
+    }
+    if (currentPage === "calendrier") {
+      return (
+        <CalendrierV2
           appId={appId}
           currentUser={currentUser}
           onNavigate={setCurrentPage}
