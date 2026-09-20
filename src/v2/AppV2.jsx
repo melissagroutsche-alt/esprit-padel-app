@@ -13,6 +13,7 @@ import { useAuth } from "../auth/AuthContext";
 import { loginUser } from "../auth/authService";
 import AppShell from "./layout/AppShell";
 import DashboardV2 from "./pages/DashboardV2";
+import ObjectifsV2 from "./pages/ObjectifsV2";
 import PlaceholderPage from "./pages/PlaceholderPage";
 import { useUsers } from "./hooks/useV1Data";
 import { useRequests, filterOpenRequests } from "./hooks/useV1Data";
@@ -195,6 +196,15 @@ export default function AppV2() {
     if (currentPage === "dashboard") {
       return (
         <DashboardV2
+          appId={appId}
+          currentUser={currentUser}
+          onNavigate={setCurrentPage}
+        />
+      );
+    }
+    if (currentPage === "objectifs") {
+      return (
+        <ObjectifsV2
           appId={appId}
           currentUser={currentUser}
           onNavigate={setCurrentPage}
