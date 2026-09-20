@@ -116,6 +116,14 @@ function taskProgress(task) {
   return { done, total: subs.length, pct: Math.round(done / subs.length * 100) };
 }
 
+/* Initiales pour avatar (présentation uniquement) */
+function initials(name) {
+  if (!name) return "?";
+  const parts = name.split(" ").filter(Boolean);
+  if (parts.length >= 2) return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  return (parts[0][0] || "?").toUpperCase();
+}
+
 /* ════════════════════════════════════════════════════════
    RÈGLES MÉTIER — documentées
    ════════════════════════════════════════════════════════ */
@@ -292,42 +300,74 @@ function ListView({ requests, taskById, users, clubs, onSelect, filter, setFilte
 
       {/* ── Cockpit KPI strip ── */}
       <div className="dem-kpi-strip">
-        <div className="dem-kpi-tile">
+
+        {/* Ouvertes — bleu/indigo */}
+        <div className="dem-kpi-tile dem-kpi-tile--open">
+          <div className="dem-kpi-icon">
+            <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+              <path d="M1.5 3.5h12M1.5 7.5h7.5M1.5 11.5h5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"/>
+            </svg>
+          </div>
           <div className="dem-kpi-val">{counts.open}</div>
           <div className="dem-kpi-label">Ouvertes</div>
           <div className="dem-kpi-rule">tâche liée non terminée</div>
         </div>
-        <div className={`dem-kpi-tile${counts.late > 0 ? " dem-kpi-tile--alert" : ""}`}>
+
+        {/* En retard — rouge/rose */}
+        <div className={`dem-kpi-tile dem-kpi-tile--late${counts.late > 0 ? " is-nonzero" : ""}`}>
+          <div className="dem-kpi-icon">
+            <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+              <circle cx="7.5" cy="7.5" r="6" stroke="currentColor" strokeWidth="1.6"/>
+              <path d="M7.5 4.5V7.5M7.5 9.5v.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
+            </svg>
+          </div>
           <div className="dem-kpi-val">{counts.late}</div>
           <div className="dem-kpi-label">En retard</div>
           <div className="dem-kpi-rule">deadline dépassée · tâche active</div>
         </div>
-        <div className={`dem-kpi-tile${counts.soon > 0 ? " dem-kpi-tile--warn" : ""}`}>
+
+        {/* Échéance proche — jaune/ambre */}
+        <div className={`dem-kpi-tile dem-kpi-tile--soon${counts.soon > 0 ? " is-nonzero" : ""}`}>
+          <div className="dem-kpi-icon">
+            <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+              <circle cx="7.5" cy="7.5" r="6" stroke="currentColor" strokeWidth="1.6"/>
+              <path d="M7.5 3.5V7.5l2.5 2" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </div>
           <div className="dem-kpi-val">{counts.soon}</div>
           <div className="dem-kpi-label">Échéance ≤ 7 j</div>
           <div className="dem-kpi-rule">tâche active</div>
         </div>
-        <div className="dem-kpi-tile dem-kpi-tile--blue">
+
+        {/* Récentes — bleu */}
+        <div className="dem-kpi-tile dem-kpi-tile--recent">
+          <div className="dem-kpi-icon">
+            <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+              <path d="M7.5 1v2M7.5 12v2M1 7.5h2M12 7.5h2M3.1 3.1l1.4 1.4M10.5 10.5l1.4 1.4M3.1 11.9l1.4-1.4M10.5 4.5l1.4-1.4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+              <circle cx="7.5" cy="7.5" r="2" stroke="currentColor" strokeWidth="1.4"/>
+            </svg>
+          </div>
           <div className="dem-kpi-val">{counts.recent}</div>
           <div className="dem-kpi-label">Reçues récemment</div>
           <div className="dem-kpi-rule">7 derniers jours</div>
         </div>
+
       </div>
 
       {/* ── Table card ── */}
       <div className="obj-cockpit-right">
 
-        {/* Filtres + recherche */}
+        {/* Segmented control + recherche */}
         <div className="dem-toolbar-row">
-          <div className="obj-filter-tabs">
+          <div className="dem-seg-ctrl">
             {FILTERS.map(f => (
               <button
                 key={f.id}
-                className={`obj-filter-tab${filter === f.id ? " active" : ""}`}
+                className={`dem-seg-btn${filter === f.id ? " active" : ""}`}
                 onClick={() => setFilter(f.id)}
               >
                 {f.label}
-                {f.count > 0 && <span className="obj-filter-tab-count">{f.count}</span>}
+                {f.count > 0 && <span className="dem-seg-count">{f.count}</span>}
               </button>
             ))}
           </div>
@@ -400,26 +440,34 @@ function ListView({ requests, taskById, users, clubs, onSelect, filter, setFilte
                 )}
               </div>
 
-              {/* Club */}
+              {/* Club — dot + nom */}
               <div className="obj-table-col dem-col--club">
-                {club
-                  ? <span className="dem-row-club">{club.name}</span>
-                  : <span className="dem-row-empty">–</span>
-                }
+                {club ? (
+                  <div className="dem-row-club-wrap">
+                    <span className="dem-row-club-dot" />
+                    <span className="dem-row-club">{club.name}</span>
+                  </div>
+                ) : <span className="dem-row-empty">–</span>}
               </div>
 
-              {/* Demandeur */}
+              {/* Demandeur — prénom brut (champ texte libre du formulaire, pas un ID) */}
               <div className="obj-table-col dem-col--person">
-                <span className="dem-row-person">
-                  {r.firstName || <span className="dem-row-empty">–</span>}
-                </span>
+                {r.firstName ? (
+                  <div className="dem-row-person-wrap">
+                    <div className="dem-row-avatar" aria-hidden="true">{initials(r.firstName)}</div>
+                    <span className="dem-row-person">{r.firstName}</span>
+                  </div>
+                ) : <span className="dem-row-empty">–</span>}
               </div>
 
               {/* Assigné à */}
               <div className="obj-table-col dem-col--person">
-                <span className="dem-row-person">
-                  {assignedName || <span className="dem-row-empty">–</span>}
-                </span>
+                {assignedName ? (
+                  <div className="dem-row-person-wrap">
+                    <div className="dem-row-avatar dem-row-avatar--ep" aria-hidden="true">{initials(assignedName)}</div>
+                    <span className="dem-row-person">{assignedName}</span>
+                  </div>
+                ) : <span className="dem-row-empty">–</span>}
               </div>
 
               {/* Tâche liée */}
@@ -427,19 +475,24 @@ function ListView({ requests, taskById, users, clubs, onSelect, filter, setFilte
                 {task
                   ? <TaskStatusBadge status={task.status} />
                   : r.taskId
-                    ? <span className="dem-row-empty">Réf. introuvable</span>
+                    ? <span className="dem-row-empty" style={{ fontSize: 10.5 }}>Réf. introuvable</span>
                     : <span className="dem-row-empty">–</span>
                 }
               </div>
 
-              {/* Échéance */}
+              {/* Échéance — icône alerte si retard */}
               <div className="obj-table-col dem-col--date">
-                {r.deadline
-                  ? <span style={{ fontSize: 11.5, fontWeight: 700, color: late ? "var(--red)" : soon ? "#D97706" : "var(--text-2)" }}>
-                      {fmtDateShort(r.deadline)}
-                    </span>
-                  : <span className="dem-row-empty">–</span>
-                }
+                {r.deadline ? (
+                  <div className={`dem-row-deadline${late ? " dem-row-deadline--late" : soon ? " dem-row-deadline--soon" : ""}`}>
+                    {late && (
+                      <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
+                        <circle cx="5.5" cy="5.5" r="5" stroke="currentColor" strokeWidth="1.4"/>
+                        <path d="M5.5 3v2.5M5.5 7v.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+                      </svg>
+                    )}
+                    <span style={{ fontSize: 11.5, fontWeight: 700 }}>{fmtDateShort(r.deadline)}</span>
+                  </div>
+                ) : <span className="dem-row-empty">–</span>}
               </div>
 
               {/* Reçue le */}
@@ -467,7 +520,7 @@ function ListView({ requests, taskById, users, clubs, onSelect, filter, setFilte
 /* ════════════════════════════════════════════════════════
    DETAIL VIEW
    ════════════════════════════════════════════════════════ */
-function DetailView({ request: r, taskById, users, clubs, onBack }) {
+function DetailView({ request: r, taskById, users, clubs, onBack, onNavigate }) {
   const task         = r.taskId ? taskById.get(String(r.taskId)) : null;
   const club         = resolveClub(requestClubIds(r)[0], clubs);
   const assignedName = resolveUserList(r.assignedTo || r.assigneeId, users);
@@ -501,28 +554,38 @@ function DetailView({ request: r, taskById, users, clubs, onBack }) {
         </span>
       </div>
 
-      {/* Header détail */}
-      <div className="obj-detail-header">
-        <div className="obj-detail-header-left">
-          <div>
-            <h1 className="obj-detail-title">{r.subject || "–"}</h1>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 5, flexWrap: "wrap" }}>
-              {club && <span style={{ fontSize: 11.5, fontWeight: 700, color: "var(--text-3)" }}>{club.name}</span>}
-              {club && <span style={{ color: "var(--border)" }}>·</span>}
-              <span style={{ fontSize: 11.5, color: "var(--text-3)" }}>
-                Reçue le {fmtDateFull(r.createdAt) || "–"}
+      {/* ── Header premium ── */}
+      <div className="dem-detail-hd">
+        <div className="dem-detail-hd-icon">
+          <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+            <path d="M3 5h16M3 10.5h10M3 16h7" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+          </svg>
+        </div>
+        <div className="dem-detail-hd-body">
+          <h1 className="dem-detail-hd-title">{r.subject || "–"}</h1>
+          <div className="dem-detail-hd-meta">
+            {club && (
+              <span className="dem-club-pill">
+                <span className="dem-club-pill-dot" />
+                {club.name}
               </span>
-              {late && (
-                <span style={{
-                  display: "inline-flex", alignItems: "center", gap: 4,
-                  fontSize: 10.5, fontWeight: 700,
-                  color: "var(--red)", background: "var(--red-bg)",
-                  padding: "2px 8px", borderRadius: 20
-                }}>
-                  Échéance dépassée
-                </span>
-              )}
-            </div>
+            )}
+            <span className="dem-date-chip">
+              <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
+                <rect x="1" y="2" width="9" height="8" rx="1.5" stroke="currentColor" strokeWidth="1.3"/>
+                <path d="M3.5 1v2M7.5 1v2M1 5h9" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+              </svg>
+              Reçue le {fmtDateFull(r.createdAt) || "–"}
+            </span>
+            {late && (
+              <span className="dem-late-badge">
+                <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
+                  <circle cx="5.5" cy="5.5" r="5" stroke="currentColor" strokeWidth="1.4"/>
+                  <path d="M5.5 3V5.5M5.5 7v.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+                </svg>
+                Échéance dépassée
+              </span>
+            )}
           </div>
         </div>
       </div>
@@ -532,12 +595,14 @@ function DetailView({ request: r, taskById, users, clubs, onBack }) {
 
         {/* ── Colonne 1 — Identité de la demande ── */}
         <div className="obj-detail-col">
-          <div className="obj-block">
+          <div className="obj-block dem-block--blue">
             <div className="obj-block-header">
-              <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-                <rect x="1.5" y="1.5" width="10" height="10" rx="1.5" stroke="currentColor" strokeWidth="1.4"/>
-                <path d="M4 5h5M4 7.5h3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
-              </svg>
+              <span className="dem-bh-icon">
+                <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+                  <rect x="1.5" y="1.5" width="10" height="10" rx="1.5" stroke="currentColor" strokeWidth="1.4"/>
+                  <path d="M4 5h5M4 7.5h3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+                </svg>
+              </span>
               Demande
             </div>
             <div className="obj-info-row">
@@ -580,12 +645,14 @@ function DetailView({ request: r, taskById, users, clubs, onBack }) {
 
           {/* Description */}
           {r.description && (
-            <div className="obj-block">
+            <div className="obj-block dem-block--orange">
               <div className="obj-block-header">
-                <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-                  <path d="M2 2.5h9v8H2z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/>
-                  <path d="M4 5h5M4 7h3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
-                </svg>
+                <span className="dem-bh-icon">
+                  <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+                    <path d="M2 2.5h9v8H2z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/>
+                    <path d="M4 5h5M4 7h3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+                  </svg>
+                </span>
                 Besoin
               </div>
               <div className="obj-block-body" style={{ fontSize: 12.5, lineHeight: 1.65, color: "var(--text)" }}>
@@ -595,12 +662,14 @@ function DetailView({ request: r, taskById, users, clubs, onBack }) {
           )}
 
           {/* Traitement */}
-          <div className="obj-block">
+          <div className="obj-block dem-block--green">
             <div className="obj-block-header">
-              <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-                <circle cx="6.5" cy="6.5" r="5" stroke="currentColor" strokeWidth="1.4"/>
-                <path d="M4.5 6.5l1.5 1.5 3-3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
+              <span className="dem-bh-icon">
+                <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+                  <circle cx="6.5" cy="6.5" r="5" stroke="currentColor" strokeWidth="1.4"/>
+                  <path d="M4.5 6.5l1.5 1.5 3-3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </span>
               Traitement
             </div>
             <div className="obj-info-row">
@@ -616,13 +685,15 @@ function DetailView({ request: r, taskById, users, clubs, onBack }) {
             </div>
           </div>
 
-          {/* ── Tâche opérationnelle liée ── */}
+          {/* ── Tâche opérationnelle liée — identité violette ── */}
           <div className="dem-task-block">
             <div className="dem-task-block-header">
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                <rect x="1.5" y="2" width="11" height="10" rx="2" stroke="currentColor" strokeWidth="1.4"/>
-                <path d="M4.5 7l1.5 1.5L9.5 5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
+              <div className="dem-task-block-icon">
+                <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+                  <rect x="1.5" y="2" width="10" height="9" rx="1.8" stroke="currentColor" strokeWidth="1.4"/>
+                  <path d="M4.5 6.5l1.5 1.5L9.5 5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </div>
               <span className="dem-task-block-label">Tâche opérationnelle liée</span>
               {task && <TaskStatusBadge status={task.status} />}
             </div>
@@ -630,6 +701,10 @@ function DetailView({ request: r, taskById, users, clubs, onBack }) {
             {/* Pas de taskId */}
             {!r.taskId && (
               <div className="dem-empty-sm">
+                <svg width="22" height="22" viewBox="0 0 22 22" fill="none" style={{ color: "#DDD6FE", marginBottom: 4 }}>
+                  <rect x="2" y="3" width="18" height="16" rx="3" stroke="currentColor" strokeWidth="1.6"/>
+                  <path d="M7 11.5l2.5 2.5L15 8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
                 <span>Aucune tâche liée à cette demande.</span>
               </div>
             )}
@@ -695,6 +770,19 @@ function DetailView({ request: r, taskById, users, clubs, onBack }) {
                     </span>
                   </div>
                 )}
+                {/* Bouton navigation — "projets" est une route réelle de AppV2 */}
+                {onNavigate && (
+                  <button className="dem-task-nav-btn" onClick={() => onNavigate("projets")}>
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                      <rect x="1" y="1.5" width="10" height="9" rx="2" stroke="currentColor" strokeWidth="1.3"/>
+                      <path d="M3.5 5.5l2 2L8.5 4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                    Voir dans Projets &amp; Tâches
+                    <svg width="11" height="11" viewBox="0 0 11 11" fill="none" style={{ marginLeft: "auto" }}>
+                      <path d="M4 2l3.5 3.5L4 9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  </button>
+                )}
               </>
             )}
           </div>
@@ -703,30 +791,46 @@ function DetailView({ request: r, taskById, users, clubs, onBack }) {
         {/* ── Colonne 3 — Pilotage ── */}
         <div className="obj-detail-col">
 
-          {/* Alerte retard */}
+          {/* Alerte retard — bloc dédié rose/rouge */}
           {late && (
-            <div className="obj-block obj-block--alert">
-              <div className="obj-block-header" style={{ color: "var(--red)" }}>
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                  <circle cx="7" cy="7" r="5.5" stroke="currentColor" strokeWidth="1.4"/>
-                  <path d="M7 4.5V7.5M7 9.5v.3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
-                </svg>
-                Alerte
+            <div className="dem-alert-block">
+              <div className="dem-alert-block-header">
+                <div className="dem-alert-block-icon">
+                  <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+                    <circle cx="6.5" cy="6.5" r="5.5" stroke="currentColor" strokeWidth="1.4"/>
+                    <path d="M6.5 4V6.5M6.5 8.5v.3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+                  </svg>
+                </div>
+                <span className="dem-alert-block-title">Alerte échéance</span>
               </div>
               <div className="dem-alert-row">
-                Échéance dépassée
-                {r.deadline && <span style={{ marginLeft: 4, fontWeight: 400 }}>depuis le {fmtDateFull(r.deadline)}</span>}
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style={{ flexShrink: 0, marginTop: 1 }}>
+                  <circle cx="7" cy="7" r="6" stroke="#DC2626" strokeWidth="1.4"/>
+                  <path d="M7 4V7M7 9v.5" stroke="#DC2626" strokeWidth="1.4" strokeLinecap="round"/>
+                </svg>
+                <div>
+                  <div style={{ fontWeight: 800, color: "#DC2626", fontSize: 12 }}>Échéance dépassée</div>
+                  {r.deadline && (
+                    <div style={{ fontSize: 11, color: "#9F1239", marginTop: 2, fontWeight: 500 }}>
+                      depuis le {fmtDateFull(r.deadline)}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           )}
 
-          {/* Relations */}
-          <div className="obj-block">
+          {/* Relations — accent indigo */}
+          <div className="obj-block dem-block--indigo">
             <div className="obj-block-header">
-              <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-                <circle cx="6.5" cy="6.5" r="4.5" stroke="currentColor" strokeWidth="1.4"/>
-                <path d="M3.5 6.5h6M6.5 3.5v6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
-              </svg>
+              <span className="dem-bh-icon">
+                <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+                  <circle cx="6.5" cy="4" r="2" stroke="currentColor" strokeWidth="1.3"/>
+                  <circle cx="2.5" cy="10" r="1.5" stroke="currentColor" strokeWidth="1.3"/>
+                  <circle cx="10.5" cy="10" r="1.5" stroke="currentColor" strokeWidth="1.3"/>
+                  <path d="M6.5 6v1.5M6.5 7.5l-3.5 1M6.5 7.5l3.5 1" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
+                </svg>
+              </span>
               Relations
             </div>
             {club && (
@@ -745,7 +849,7 @@ function DetailView({ request: r, taskById, users, clubs, onBack }) {
               <span className="obj-info-label">Tâche liée</span>
               <span className="obj-info-val">
                 {task ? (
-                  <span style={{ color: "var(--ep-blue)", fontWeight: 600 }}>
+                  <span style={{ color: "#7C3AED", fontWeight: 700 }}>
                     {task.title ? `${task.title.slice(0, 28)}${task.title.length > 28 ? "…" : ""}` : "–"}
                   </span>
                 ) : r.taskId ? (
@@ -759,12 +863,14 @@ function DetailView({ request: r, taskById, users, clubs, onBack }) {
 
           {/* Activité — task.history (5 entrées max, les plus récentes) */}
           {activity.length > 0 && (
-            <div className="obj-block">
+            <div className="obj-block dem-block--slate">
               <div className="obj-block-header">
-                <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-                  <path d="M6.5 2A4.5 4.5 0 1 0 11 6.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
-                  <path d="M6.5 4v2.5l1.5 1" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
-                </svg>
+                <span className="dem-bh-icon">
+                  <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+                    <path d="M6.5 2A4.5 4.5 0 1 0 11 6.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+                    <path d="M6.5 4v2.5l1.5 1" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                </span>
                 Activité (tâche)
               </div>
               {activity.map((h, i) => {
@@ -784,12 +890,14 @@ function DetailView({ request: r, taskById, users, clubs, onBack }) {
 
           {/* Tâche présente mais historique vide */}
           {task && activity.length === 0 && (
-            <div className="obj-block">
+            <div className="obj-block dem-block--slate">
               <div className="obj-block-header">
-                <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-                  <path d="M6.5 2A4.5 4.5 0 1 0 11 6.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
-                  <path d="M6.5 4v2.5l1.5 1" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
-                </svg>
+                <span className="dem-bh-icon">
+                  <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+                    <path d="M6.5 2A4.5 4.5 0 1 0 11 6.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+                    <path d="M6.5 4v2.5l1.5 1" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                </span>
                 Activité
               </div>
               <div className="dem-empty-sm">
@@ -855,6 +963,7 @@ export default function DemandesV2({ appId, currentUser, onNavigate, initialSele
         users={users}
         clubs={clubs}
         onBack={() => setSelected(null)}
+        onNavigate={onNavigate}
       />
     );
   }
