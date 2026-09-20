@@ -1777,7 +1777,7 @@ function StocksView({ currentUser, appId, campagnes, events, onBack }) {
           </div>
         </div>
         {isAdmin && (
-          <button className="camp-btn camp-btn--primary" onClick={() => setShowCreate(true)}>
+          <button className="camp-btn stk-add-btn" onClick={() => setShowCreate(true)}>
             <IconPlus size={14} /> Nouvel article
           </button>
         )}
@@ -1785,19 +1785,19 @@ function StocksView({ currentUser, appId, campagnes, events, onBack }) {
 
       {/* ── KPI ── */}
       <div className="stk-kpi-row">
-        <div className="stk-kpi">
+        <div className="stk-kpi stk-kpi--blue">
           <div className="stk-kpi__val">{loading ? "…" : kpiArticles}</div>
           <div className="stk-kpi__label">Articles</div>
         </div>
-        <div className="stk-kpi">
+        <div className="stk-kpi stk-kpi--purple">
           <div className="stk-kpi__val">{loading ? "…" : kpiVariants}</div>
           <div className="stk-kpi__label">Variantes actives</div>
         </div>
-        <div className="stk-kpi">
+        <div className="stk-kpi stk-kpi--yellow">
           <div className="stk-kpi__val">{loading ? "…" : kpiLinks}</div>
           <div className="stk-kpi__label">Campagnes / événements</div>
         </div>
-        <div className="stk-kpi stk-kpi--na">
+        <div className="stk-kpi stk-kpi--green stk-kpi--na">
           <div className="stk-kpi__val">—</div>
           <div className="stk-kpi__label">Alertes stock</div>
           <div className="stk-kpi__hint">Disponible en P4</div>
@@ -1836,10 +1836,23 @@ function StocksView({ currentUser, appId, campagnes, events, onBack }) {
             <div className="stk-error">Erreur de chargement : {error.message}</div>
           ) : filtered.length === 0 ? (
             <div className="stk-empty">
-              <IconFolder size={28} />
-              <span>{items.length === 0
-                ? (isAdmin ? "Aucun article. Créez votre premier article avec le bouton ci-dessus." : "Aucun article pour l'instant.")
-                : "Aucun résultat pour ces filtres."}</span>
+              {items.length === 0 ? (
+                <>
+                  <div className="stk-empty__icon"><IconFolder size={22} /></div>
+                  <span className="stk-empty__title">Aucun article pour le moment</span>
+                  <span className="stk-empty__sub">
+                    {isAdmin
+                      ? "Créez votre premier article pour préparer les futurs stocks liés à vos campagnes et événements."
+                      : "Aucun article disponible pour l'instant."}
+                  </span>
+                </>
+              ) : (
+                <>
+                  <div className="stk-empty__icon"><IconSearch size={20} /></div>
+                  <span className="stk-empty__title">Aucun résultat</span>
+                  <span className="stk-empty__sub">Aucun article ne correspond à ces filtres.</span>
+                </>
+              )}
             </div>
           ) : (
             <div className="stk-cards">
@@ -1860,16 +1873,17 @@ function StocksView({ currentUser, appId, campagnes, events, onBack }) {
           {!loading && (
             <div className="stk-upcoming-row">
               {[
-                { label: "Réceptions fournisseurs", desc: "Saisir et valider les réceptions de matériel.", phase: "P4" },
-                { label: "Mouvements & transferts",  desc: "Déplacements inter-clubs, sorties de stock.",   phase: "P5" },
-                { label: "Inventaires",               desc: "Comptage et ajustement des niveaux réels.",     phase: "P6" },
+                { label: "Réceptions fournisseurs", desc: "Saisir et valider les réceptions de matériel.", phase: "P4", mod: "p4" },
+                { label: "Mouvements & transferts",  desc: "Déplacements inter-clubs, sorties de stock.",   phase: "P5", mod: "p5" },
+                { label: "Inventaires",               desc: "Comptage et ajustement des niveaux réels.",     phase: "P6", mod: "p6" },
               ].map(s => (
-                <div key={s.label} className="stk-upcoming-card">
+                <div key={s.label} className={`stk-upcoming-card stk-upcoming-card--${s.mod}`}>
                   <div className="stk-upcoming-card__top">
                     <span className="stk-upcoming-card__label">{s.label}</span>
-                    <span className="stk-upcoming-card__phase">{s.phase}</span>
+                    <span className="stk-upcoming-card__badge">À venir</span>
                   </div>
                   <p className="stk-upcoming-card__desc">{s.desc}</p>
+                  <span className="stk-upcoming-card__phase">{s.phase}</span>
                 </div>
               ))}
             </div>
