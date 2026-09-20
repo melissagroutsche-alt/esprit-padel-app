@@ -2,18 +2,18 @@ import React, { useState, useMemo, useRef, useEffect } from "react";
 import {
   useCalendarEvents, useTasks, usePublications,
   useMeetings, useMetricool, useClubs,
-  useProjects, useRequests,
+  useProjects, useRequests, useUsers,
 } from "../hooks/useV1Data";
 
 /* ── Pastel color tokens per source ── */
 const C = {
-  event:       { bg: "#BFDBFE", text: "#1E3A8A", border: "#93C5FD" }, // bleu
-  task:        { bg: "#FDE68A", text: "#78350F", border: "#FCD34D" }, // jaune
-  publication: { bg: "#FED7AA", text: "#7C2D12", border: "#FDBA74" }, // orange
-  meeting:     { bg: "#BBF7D0", text: "#064E3B", border: "#86EFAC" }, // vert
-  metricool:   { bg: "#E9D5FF", text: "#581C87", border: "#D8B4FE" }, // violet
-  project:     { bg: "#FBCFE8", text: "#9D174D", border: "#F9A8D4" }, // rose
-  request:     { bg: "#C7D2FE", text: "#3730A3", border: "#A5B4FC" }, // indigo
+  event:       { bg: "#BFDBFE", text: "#1E3A8A", border: "#93C5FD" },
+  task:        { bg: "#FDE68A", text: "#78350F", border: "#FCD34D" },
+  publication: { bg: "#FED7AA", text: "#7C2D12", border: "#FDBA74" },
+  meeting:     { bg: "#BBF7D0", text: "#064E3B", border: "#86EFAC" },
+  metricool:   { bg: "#E9D5FF", text: "#581C87", border: "#D8B4FE" },
+  project:     { bg: "#FBCFE8", text: "#9D174D", border: "#F9A8D4" },
+  request:     { bg: "#C7D2FE", text: "#3730A3", border: "#A5B4FC" },
 };
 
 const SOURCE_LABELS = {
@@ -27,8 +27,18 @@ const SOURCE_LABELS = {
   marketing360: "Marketing 360°",
 };
 
-/* Ordre d'affichage des filtres actifs */
 const FILTER_ORDER = ["event","publication","metricool","project","meeting","task","request"];
+
+/* Route mapping — sourceType → pageId V2 (null = pas de module dédié → bouton masqué) */
+const ROUTE_MAP = {
+  event:       "evenements",   // Placeholder — module à venir
+  task:        "projets",      // Placeholder — module à venir
+  publication: "contenus",     // Placeholder — module à venir
+  project:     "campagnes",    // Placeholder — module à venir
+  request:     "demandes",     // Placeholder — module à venir
+  meeting:     null,           // Aucune route dédiée en V2
+  metricool:   null,           // Aucune route dédiée en V2
+};
 
 /* ── Date utils ── */
 const FR_DAYS   = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
@@ -62,7 +72,6 @@ function getMonthGridDates(year, month) {
   return Array.from({ length: 42 }, (_, i) => addDays(start, i));
 }
 
-/* Returns true when item is active on the given day (respects endDate for multi-day items) */
 function itemCoversDay(item, d) {
   if (!item.date) return false;
   const s = startOfDay(item.date);
@@ -86,6 +95,39 @@ function resolveClub(clubId, clubs) {
   return name ? { id: clubId, name, color: null } : null;
 }
 
+/*
+ * User resolution — résout un ID (appId, uid, id numérique) en nom lisible.
+ * Si l'ID ressemble à un timestamp technique (≥10 chiffres) et qu'aucun
+ * utilisateur ne correspond, renvoie null → la ligne n'est pas affichée.
+ * Si c'est une chaîne déjà lisible (prénom, email), elle est conservée.
+ * Ne jamais afficher d'ID brut dans l'interface.
+ */
+function resolveUser(rawId, users) {
+  if (!rawId) return null;
+  const sid = String(rawId).trim();
+  if (users && users.length) {
+    const u = users.find(x =>
+      String(x.id)    === sid ||
+      String(x.appId) === sid ||
+      String(x.uid)   === sid
+    );
+    if (u) {
+      const name = u.name || u.displayName || [u.prenom, u.nom].filter(Boolean).join(" ") || u.email;
+      return name || null;
+    }
+  }
+  // ID technique (long numérique) sans correspondance → masquer
+  if (/^\d{10,}$/.test(sid)) return null;
+  return sid; // chaîne déjà lisible
+}
+
+function resolveUserList(ids, users) {
+  if (!ids) return null;
+  const list = Array.isArray(ids) ? ids : [ids];
+  const names = list.map(id => resolveUser(id, users)).filter(Boolean);
+  return names.length > 0 ? names.join(", ") : null;
+}
+
 /* ════════════════════════════════════════════════════════
    NORMALIZERS — lecture seule, aucune écriture Firestore
    ════════════════════════════════════════════════════════ */
@@ -95,14 +137,11 @@ function normalizeEvents(events, clubs) {
     const d = parseDate(e.date || e.startDate || e.start);
     if (!d) return null;
     return {
-      id: `event-${e.id || Math.random()}`,
-      sourceType: "event", sourceId: e.id,
+      id: `event-${e.id || Math.random()}`, sourceType: "event", sourceId: e.id,
       title: e.title || e.nom || e.name || "Événement",
       date: d, endDate: parseDate(e.endDate || e.end) || null,
-      time: e.time || e.startTime || null,
-      endTime: e.endTime || null,
-      allDay: !e.time && !e.startTime,
-      color: C.event,
+      time: e.time || e.startTime || null, endTime: e.endTime || null,
+      allDay: !e.time && !e.startTime, color: C.event,
       club: resolveClub(e.club || e.clubId, clubs),
       status: e.status || null, meta: e,
     };
@@ -114,13 +153,11 @@ function normalizeTasks(tasks, clubs) {
     const d = parseDate(t.dueDate || t.deadline || t.date);
     if (!d) return null;
     return {
-      id: `task-${t.id || Math.random()}`,
-      sourceType: "task", sourceId: t.id,
+      id: `task-${t.id || Math.random()}`, sourceType: "task", sourceId: t.id,
       title: t.title || t.name || t.label || "Tâche",
       date: d, endDate: null,
       time: t.time || null, endTime: null,
-      allDay: !t.time,
-      color: C.task,
+      allDay: !t.time, color: C.task,
       club: resolveClub(t.club || t.clubId, clubs),
       status: t.status || null, meta: t,
     };
@@ -133,13 +170,11 @@ function normalizePublications(publications, clubs) {
     if (!d) return null;
     const text = p.text || p.caption || "";
     return {
-      id: `pub-${p.id || Math.random()}`,
-      sourceType: "publication", sourceId: p.id,
+      id: `pub-${p.id || Math.random()}`, sourceType: "publication", sourceId: p.id,
       title: p.title || (text.slice(0, 40) + (text.length > 40 ? "…" : "")) || "Publication",
       date: d, endDate: null,
       time: p.time || null, endTime: null,
-      allDay: !p.time,
-      color: C.publication,
+      allDay: !p.time, color: C.publication,
       club: resolveClub(p.club || p.clubId, clubs),
       status: p.status || p.statut || null, meta: p,
     };
@@ -151,14 +186,11 @@ function normalizeMeetings(meetings, clubs) {
     const d = parseDate(m.date || m.startDate || m.start);
     if (!d) return null;
     return {
-      id: `meeting-${m.id || Math.random()}`,
-      sourceType: "meeting", sourceId: m.id,
+      id: `meeting-${m.id || Math.random()}`, sourceType: "meeting", sourceId: m.id,
       title: m.title || m.subject || m.objet || "Réunion",
       date: d, endDate: parseDate(m.endDate || m.end) || null,
-      time: m.time || m.startTime || null,
-      endTime: m.endTime || null,
-      allDay: !m.time && !m.startTime,
-      color: C.meeting,
+      time: m.time || m.startTime || null, endTime: m.endTime || null,
+      allDay: !m.time && !m.startTime, color: C.meeting,
       club: resolveClub(m.club || m.clubId, clubs),
       status: m.status || null, meta: m,
     };
@@ -167,13 +199,10 @@ function normalizeMeetings(meetings, clubs) {
 
 /*
  * Metricool — ep:metricool-approvals
- * Structure : { items: [...], syncedAt, ok } ou tableau direct.
- * publicationDate : { dateTime: "ISO" } | { date: "YYYY-MM-DD" } | chaîne brute.
- *
- * NOTE DÉDUPLICATION : ep:publications et ep:metricool-approvals sont deux sources
- * distinctes. Aucune déduplication approximative (titre, date, texte) n'est appliquée.
- * Une déduplication fiable nécessitera un identifiant partagé entre les deux collections
- * (ex. metricoolId dans ep:publications). À implémenter dans une version ultérieure.
+ * NOTE DÉDUPLICATION : ep:publications et ep:metricool-approvals restent deux
+ * sources distinctes (filtres séparés, prefixes d'ID différents). Aucune
+ * déduplication approchée (titre, date, texte). À traiter quand un identifiant
+ * partagé fiable sera disponible entre les deux collections.
  */
 function normalizeMetricool(data, clubs) {
   if (!data) return [];
@@ -186,14 +215,11 @@ function normalizeMetricool(data, clubs) {
     if (!d) return null;
     const hasTime = !!(item.publicationDate?.dateTime);
     return {
-      id: `metricool-${item.id || Math.random()}`,
-      sourceType: "metricool", sourceId: item.id,
+      id: `metricool-${item.id || Math.random()}`, sourceType: "metricool", sourceId: item.id,
       title: (item.text || item.title || "Post").slice(0, 60),
       date: d, endDate: null,
-      time: hasTime ? d.toTimeString().slice(0, 5) : null,
-      endTime: null,
-      allDay: !hasTime,
-      color: C.metricool,
+      time: hasTime ? d.toTimeString().slice(0, 5) : null, endTime: null,
+      allDay: !hasTime, color: C.metricool,
       club: resolveClub(item.club, clubs),
       status: item.status || null, meta: item,
     };
@@ -202,9 +228,8 @@ function normalizeMetricool(data, clubs) {
 
 /*
  * Projets / Campagnes — ep:projects
- * Seuls les projets ayant une deadline ou une date de début sont inclus.
- * Si startDate + deadline : période multi-jours (endDate utilisé pour le rendu étendu).
- * Si deadline uniquement : point unique allDay.
+ * Seuls les projets avec deadline ou startDate sont inclus.
+ * startDate + deadline → période multi-jours. deadline seule → point unique allDay.
  * createdAt n'est jamais utilisé comme date calendrier.
  */
 function normalizeProjects(projects, clubs) {
@@ -215,13 +240,10 @@ function normalizeProjects(projects, clubs) {
     const date    = startDate || deadline;
     const endDate = startDate && deadline ? deadline : null;
     return {
-      id: `project-${p.id || Math.random()}`,
-      sourceType: "project", sourceId: p.id,
+      id: `project-${p.id || Math.random()}`, sourceType: "project", sourceId: p.id,
       title: p.name || p.title || p.nom || "Campagne",
-      date, endDate,
-      time: null, endTime: null,
-      allDay: true,
-      color: C.project,
+      date, endDate, time: null, endTime: null,
+      allDay: true, color: C.project,
       club: resolveClub(p.club || p.clubId, clubs),
       status: p.status || p.statut || null, meta: p,
     };
@@ -230,21 +252,18 @@ function normalizeProjects(projects, clubs) {
 
 /*
  * Demandes clubs — ep:requests
- * Apparaît dans le calendrier UNIQUEMENT si une deadline explicite est présente.
- * createdAt n'est PAS utilisé comme date calendrier : ce n'est pas une échéance.
+ * Uniquement si une deadline explicite existe.
+ * createdAt n'est PAS utilisé comme date calendrier.
  */
 function normalizeRequests(requests, clubs) {
   return (requests || []).filter(Boolean).map(r => {
     const deadline = parseDate(r.deadline || r.dueDate);
-    if (!deadline) return null; // pas de deadline = pas dans le calendrier
+    if (!deadline) return null;
     return {
-      id: `request-${r.id || Math.random()}`,
-      sourceType: "request", sourceId: r.id,
+      id: `request-${r.id || Math.random()}`, sourceType: "request", sourceId: r.id,
       title: r.subject || r.titre || r.title || r.objet || "Demande",
-      date: deadline, endDate: null,
-      time: null, endTime: null,
-      allDay: true,
-      color: C.request,
+      date: deadline, endDate: null, time: null, endTime: null,
+      allDay: true, color: C.request,
       club: resolveClub(r.club || r.clubId, clubs),
       status: r.status || r.statut || null, meta: r,
     };
@@ -265,7 +284,7 @@ function applyFilters(items, selectedClubs, selectedSources) {
 /* ── Shared constants ── */
 const HOUR_START = 7;
 const HOUR_END   = 22;
-const HOUR_H     = 56; // px per hour
+const HOUR_H     = 56;
 const HOURS      = Array.from({ length: HOUR_END - HOUR_START }, (_, i) => HOUR_START + i);
 
 function timeToMins(t) {
@@ -286,6 +305,7 @@ export default function CalendrierV2({ appId, currentUser, onNavigate }) {
   const { projects }     = useProjects();
   const { requests }     = useRequests();
   const { clubs }        = useClubs();
+  const { users }        = useUsers();
 
   const [view,            setView]           = useState("week");
   const [focusDate,       setFocusDate]      = useState(() => startOfDay(new Date()));
@@ -353,7 +373,7 @@ export default function CalendrierV2({ appId, currentUser, onNavigate }) {
   function openPopover(item, e) {
     e.stopPropagation();
     const rect = e.currentTarget.getBoundingClientRect();
-    setPopover({ item, x: rect.left, y: rect.bottom + 6 });
+    setPopover({ item, x: rect.left, y: rect.bottom + 8 });
   }
 
   function headerTitle() {
@@ -401,7 +421,7 @@ export default function CalendrierV2({ appId, currentUser, onNavigate }) {
             </label>
           ))}
           <div className="cal-filter-item cal-filter-disconnected">
-            <span style={{ width: 13, flexShrink: 0 }} />
+            <span style={{ width: 14, flexShrink: 0 }} />
             <span className="cal-filter-dot" style={{ background: "#E5E7EB", border: "1.5px solid #D1D5DB" }} />
             <span>{SOURCE_LABELS.marketing360}</span>
             <span className="cal-filter-badge">Bientôt</span>
@@ -413,16 +433,16 @@ export default function CalendrierV2({ appId, currentUser, onNavigate }) {
       <div className="cal-main">
         <div className="cal-toolbar">
           <div className="cal-toolbar-left">
-            <button className="cal-btn-today" onClick={navToday}>Aujourd'hui</button>
             <div className="cal-nav">
               <button className="cal-nav-btn" onClick={navPrev} aria-label="Précédent">
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M10 12L6 8l4-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M10 12L6 8l4-4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
               </button>
               <button className="cal-nav-btn" onClick={navNext} aria-label="Suivant">
-                <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M6 4l4 4-4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
               </button>
             </div>
             <h2 className="cal-period-title">{headerTitle()}</h2>
+            <button className="cal-btn-today" onClick={navToday}>Aujourd'hui</button>
           </div>
           <div className="cal-view-tabs">
             {[["day","Jour"],["week","Semaine"],["month","Mois"]].map(([v, label]) => (
@@ -431,13 +451,15 @@ export default function CalendrierV2({ appId, currentUser, onNavigate }) {
           </div>
         </div>
 
-        {view === "week"  && <WeekView  focusDate={focusDate} items={filtered} onItemClick={openPopover} onDayClick={d => { setFocusDate(d); setView("day"); }} />}
-        {view === "month" && <MonthView focusDate={focusDate} items={filtered} onItemClick={openPopover} onDayClick={d => { setFocusDate(d); setView("day"); }} />}
-        {view === "day"   && <DayView   focusDate={focusDate} items={filtered} onItemClick={openPopover} />}
+        <div className="cal-body">
+          {view === "week"  && <WeekView  focusDate={focusDate} items={filtered} onItemClick={openPopover} onDayClick={d => { setFocusDate(d); setView("day"); }} />}
+          {view === "month" && <MonthView focusDate={focusDate} items={filtered} onItemClick={openPopover} onDayClick={d => { setFocusDate(d); setView("day"); }} />}
+          {view === "day"   && <DayView   focusDate={focusDate} items={filtered} onItemClick={openPopover} />}
+        </div>
       </div>
 
       {popover && (
-        <ItemPopover ref={popoverRef} item={popover.item} x={popover.x} y={popover.y} onClose={() => setPopover(null)} />
+        <ItemPopover ref={popoverRef} item={popover.item} x={popover.x} y={popover.y} users={users} onNavigate={onNavigate} onClose={() => setPopover(null)} />
       )}
     </div>
   );
@@ -450,12 +472,9 @@ function MiniCalendar({ month, focusDate, items, onNavigate, onMonthChange }) {
   const year = month.getFullYear(), mon = month.getMonth();
   const dates = getMonthGridDates(year, mon);
 
-  /* Mark dots for any day covered by an item (includes multi-day via itemCoversDay) */
   const busySet = useMemo(() => {
     const s = new Set();
-    dates.forEach(d => {
-      if (items.some(item => itemCoversDay(item, d))) s.add(fmtISO(d));
-    });
+    dates.forEach(d => { if (items.some(item => itemCoversDay(item, d))) s.add(fmtISO(d)); });
     return s;
   }, [items, dates]);
 
@@ -463,11 +482,11 @@ function MiniCalendar({ month, focusDate, items, onNavigate, onMonthChange }) {
     <div className="cal-mini">
       <div className="cal-mini-header">
         <button className="cal-mini-nav" onClick={() => onMonthChange(addMonths(month, -1))}>
-          <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M8.5 10.5L4.5 6.5l4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M9 11L5 7l4-4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg>
         </button>
-        <span className="cal-mini-title">{FR_MONTHS[mon].slice(0,3)} {year}</span>
+        <span className="cal-mini-title">{FR_MONTHS[mon]} {year}</span>
         <button className="cal-mini-nav" onClick={() => onMonthChange(addMonths(month, 1))}>
-          <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M4.5 2.5l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M5 3l4 4-4 4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/></svg>
         </button>
       </div>
       <div className="cal-mini-grid">
@@ -479,7 +498,7 @@ function MiniCalendar({ month, focusDate, items, onNavigate, onMonthChange }) {
             onClick={() => onNavigate(d)}
           >
             {d.getDate()}
-            {busySet.has(fmtISO(d)) && <span className="cal-mini-dot" />}
+            {busySet.has(fmtISO(d)) && !isSameDay(d, focusDate) && <span className="cal-mini-dot" />}
           </button>
         ))}
       </div>
@@ -493,8 +512,6 @@ function MiniCalendar({ month, focusDate, items, onNavigate, onMonthChange }) {
 function WeekView({ focusDate, items, onItemClick, onDayClick }) {
   const weekStart = getWeekStart(focusDate);
   const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
-
-  /* Timed items: only single-day, always use start date */
   const timed = useMemo(() => items.filter(x => !x.allDay && x.time), [items]);
 
   return (
@@ -514,7 +531,6 @@ function WeekView({ focusDate, items, onItemClick, onDayClick }) {
         })}
       </div>
 
-      {/* All-day zone — includes multi-day items that cover each day */}
       <div className="cal-allday-row">
         <div className="cal-gutter cal-allday-lbl">Journée</div>
         {days.map((d, i) => {
@@ -568,17 +584,16 @@ function MonthView({ focusDate, items, onItemClick, onDayClick }) {
       <div className="cal-month-grid">
         {dates.map((d, i) => {
           const isT = isSameDay(d, new Date()), isF = isSameDay(d, focusDate), other = d.getMonth() !== month;
-          /* Timed items: exact day only. All-day items: cover check (multi-day). */
           const dayTimed  = items.filter(x => !x.allDay && isSameDay(x.date, d));
           const dayAllDay = items.filter(x => x.allDay && itemCoversDay(x, d));
           const dayItems  = [...dayAllDay, ...dayTimed];
           const shown = dayItems.slice(0, 3), more = dayItems.length - shown.length;
           return (
             <div key={i} className={`cal-mcell${other ? " other" : ""}${isT ? " today" : ""}`} onClick={() => onDayClick(d)}>
-              <div className={`cal-mnum${isT ? " today" : ""}${isF ? " focus" : ""}`}>{d.getDate()}</div>
+              <div className={`cal-mnum${isT ? " today" : ""}${isF && !isT ? " focus" : ""}`}>{d.getDate()}</div>
               <div className="cal-mevents">
                 {shown.map(item => (
-                  <button key={`${item.id}-${fmtISO(d)}`} className="cal-mchip" style={{ background: item.color.bg, color: item.color.text }} onClick={e => { e.stopPropagation(); onItemClick(item, e); }}>
+                  <button key={`${item.id}-${fmtISO(d)}`} className="cal-mchip" style={{ background: item.color.bg, color: item.color.text, borderLeft: `2.5px solid ${item.color.border}` }} onClick={e => { e.stopPropagation(); onItemClick(item, e); }}>
                     {item.title}
                   </button>
                 ))}
@@ -596,9 +611,7 @@ function MonthView({ focusDate, items, onItemClick, onDayClick }) {
    DAY VIEW
    ════════════════════════════════════════════════════════ */
 function DayView({ focusDate, items, onItemClick }) {
-  /* All-day: any item that covers focusDate (includes multi-day ranges) */
   const allDay = useMemo(() => items.filter(x => x.allDay && itemCoversDay(x, focusDate)), [items, focusDate]);
-  /* Timed: only exact start-day items */
   const timed  = useMemo(() => items.filter(x => !x.allDay && x.time && isSameDay(x.date, focusDate)), [items, focusDate]);
   const isT    = isSameDay(focusDate, new Date());
 
@@ -639,11 +652,7 @@ function TimedEvent({ item, onClick }) {
   const top      = ((startMin / 60) - HOUR_START) * HOUR_H;
   const height   = Math.max(((endMin - startMin) / 60) * HOUR_H, 22);
   return (
-    <button
-      className="cal-timed"
-      style={{ top, height, background: item.color.bg, color: item.color.text, borderLeft: `3px solid ${item.color.border}` }}
-      onClick={onClick}
-    >
+    <button className="cal-timed" style={{ top, height, background: item.color.bg, color: item.color.text, borderLeft: `3px solid ${item.color.border}` }} onClick={onClick}>
       <span className="cal-timed-time">{item.time}</span>
       <span className="cal-timed-title">{item.title}</span>
     </button>
@@ -665,92 +674,133 @@ function NowLine() {
 }
 
 /* ════════════════════════════════════════════════════════
-   POPOVER — adaptée au type de source
+   POPOVER — premium card, jamais d'ID technique affiché
    ════════════════════════════════════════════════════════ */
-const ItemPopover = React.forwardRef(function ItemPopover({ item, x, y, onClose }, ref) {
+const ItemPopover = React.forwardRef(function ItemPopover({ item, x, y, users, onNavigate, onClose }, ref) {
   const { sourceType, title, date, endDate, time, endTime, allDay, club, status, meta } = item;
   const col = item.color;
 
-  const dateStr = date
-    ? `${FR_DAYS[(date.getDay()+6)%7]} ${date.getDate()} ${FR_MONTHS[date.getMonth()]} ${date.getFullYear()}`
-    : null;
-  const endDateStr = endDate
-    ? `${FR_DAYS[(endDate.getDay()+6)%7]} ${endDate.getDate()} ${FR_MONTHS[endDate.getMonth()]} ${endDate.getFullYear()}`
-    : null;
-  const timeStr = allDay ? "Toute la journée" : time ? (endTime ? `${time} – ${endTime}` : time) : null;
+  /* Date display */
+  const fmtDate = d => d ? `${FR_DAYS[(d.getDay()+6)%7]} ${d.getDate()} ${FR_MONTHS[d.getMonth()].slice(0,3)} ${d.getFullYear()}` : null;
+  const dateStr    = fmtDate(date);
+  const endDateStr = fmtDate(endDate);
 
-  const safeX = Math.min(x, (typeof window !== "undefined" ? window.innerWidth  : 800) - 300);
-  const safeY = Math.min(y, (typeof window !== "undefined" ? window.innerHeight : 600) - 340);
+  /* Time display */
+  const timeStr = allDay
+    ? "Toute la journée"
+    : time ? (endTime ? `${time} – ${endTime}` : time) : null;
+
+  /* When line: combines date + time */
+  const whenLine = endDateStr
+    ? `${dateStr} → ${endDateStr}`
+    : timeStr
+      ? (dateStr ? `${dateStr}  ·  ${timeStr}` : timeStr)
+      : dateStr;
+
+  /* Resolve users — jamais d'ID brut */
+  const assignedName    = resolveUser(meta.assignedTo || meta.assignee, users);
+  const ownerName       = resolveUser(meta.owner || meta.responsable || meta.createdBy, users);
+  const participantList = resolveUserList(meta.participants || meta.members, users);
+
+  /* Position safety */
+  const W = typeof window !== "undefined" ? window.innerWidth  : 900;
+  const H = typeof window !== "undefined" ? window.innerHeight : 700;
+  const targetPage  = ROUTE_MAP[sourceType] ?? null;
+  const safeX = Math.min(x, W - 308);
+  const safeY = Math.min(y, H - 400);
+
+  /* Source-specific details */
+  const details = [];
+  if (sourceType === "task") {
+    if (assignedName) details.push({ label: "Assigné à",   value: assignedName });
+    if (meta.project)details.push({ label: "Projet",       value: meta.project });
+  }
+  if (sourceType === "publication") {
+    if (meta.networks) details.push({ label: "Réseaux", value: Array.isArray(meta.networks) ? meta.networks.join(", ") : meta.networks });
+  }
+  if (sourceType === "event") {
+    if (meta.location) details.push({ label: "Lieu", value: meta.location });
+  }
+  if (sourceType === "meeting") {
+    if (meta.location)      details.push({ label: "Lieu",         value: meta.location });
+    if (participantList)    details.push({ label: "Participants",  value: participantList });
+  }
+  if (sourceType === "project") {
+    if (ownerName)       details.push({ label: "Responsable", value: ownerName });
+    if (participantList) details.push({ label: "Équipe",       value: participantList });
+  }
+  if (sourceType === "request") {
+    if (assignedName) details.push({ label: "Assigné à", value: assignedName });
+  }
+
+  const excerpt = sourceType === "metricool" ? meta.text
+    : sourceType === "project" || sourceType === "request" ? meta.description
+    : null;
 
   return (
-    <div ref={ref} className="cal-popover" style={{ left: safeX, top: safeY }}>
-      <div className="cal-pop-header" style={{ borderTop: `3px solid ${col.border}` }}>
-        <span className="cal-pop-type" style={{ background: col.bg, color: col.text }}>{SOURCE_LABELS[sourceType] || sourceType}</span>
+    <div ref={ref} className="cal-popover" style={{ left: safeX, top: safeY, borderTop: `3px solid ${col.border}` }}>
+      {/* Source badge + close */}
+      <div className="cal-pop-bar">
+        <span className="cal-pop-source" style={{ background: col.bg, color: col.text }}>
+          {SOURCE_LABELS[sourceType] || sourceType}
+        </span>
         <button className="cal-pop-close" onClick={onClose} aria-label="Fermer">
-          <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M2 2l9 9M11 2l-9 9" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"/></svg>
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1.5 1.5l9 9M10.5 1.5l-9 9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></svg>
         </button>
       </div>
+
+      {/* Title */}
       <div className="cal-pop-body">
         <div className="cal-pop-title">{title}</div>
 
-        {/* Champs communs */}
-        {dateStr    && <PopRow label={endDateStr ? "Début"   : "Date"}    value={dateStr} />}
-        {endDateStr && <PopRow label="Fin"     value={endDateStr} />}
-        {timeStr    && <PopRow label="Horaire" value={timeStr} />}
-        {club       && <PopRow label="Club"    value={club.name} />}
-        {status     && <PopRow label="Statut"  value={status} />}
+        {/* When */}
+        {whenLine && <div className="cal-pop-when">{whenLine}</div>}
 
-        {/* Événements */}
-        {sourceType === "event" && <>
-          {meta.location && <PopRow label="Lieu" value={meta.location} />}
-        </>}
+        {/* Club + status on same row */}
+        {(club || status) && (
+          <div className="cal-pop-meta-row">
+            {club && (
+              <span className="cal-pop-club">
+                <span className="cal-pop-club-dot" style={{ background: col.border }} />
+                {club.name}
+              </span>
+            )}
+            {status && <span className="cal-pop-status" style={{ background: col.bg, color: col.text }}>{status}</span>}
+          </div>
+        )}
 
-        {/* Tâches */}
-        {sourceType === "task" && <>
-          {meta.assignedTo && <PopRow label="Assigné" value={meta.assignedTo} />}
-          {meta.project    && <PopRow label="Projet"  value={meta.project} />}
-        </>}
+        {/* Source-specific details */}
+        {details.length > 0 && (
+          <>
+            <div className="cal-pop-sep" />
+            {details.map(({ label, value }) => (
+              <div key={label} className="cal-pop-row">
+                <span className="cal-pop-lbl">{label}</span>
+                <span className="cal-pop-val">{value}</span>
+              </div>
+            ))}
+          </>
+        )}
 
-        {/* Publications */}
-        {sourceType === "publication" && <>
-          {meta.networks && <PopRow label="Réseaux" value={Array.isArray(meta.networks) ? meta.networks.join(", ") : meta.networks} />}
-        </>}
+        {/* Excerpt (Metricool, project description, etc.) */}
+        {excerpt && (
+          <div className="cal-pop-excerpt">{String(excerpt).slice(0, 130)}{String(excerpt).length > 130 ? "…" : ""}</div>
+        )}
 
-        {/* Réunions */}
-        {sourceType === "meeting" && <>
-          {meta.location     && <PopRow label="Lieu"         value={meta.location} />}
-          {meta.participants && <PopRow label="Participants"  value={Array.isArray(meta.participants) ? meta.participants.join(", ") : meta.participants} />}
-        </>}
-
-        {/* Metricool */}
-        {sourceType === "metricool" && <>
-          {meta.networks && <PopRow label="Réseaux" value={Array.isArray(meta.networks) ? meta.networks.join(", ") : meta.networks} />}
-          {meta.text && <div className="cal-pop-excerpt">{meta.text.slice(0, 120)}{meta.text.length > 120 ? "…" : ""}</div>}
-        </>}
-
-        {/* Campagnes / Projets */}
-        {sourceType === "project" && <>
-          {(meta.owner || meta.responsable) && <PopRow label="Responsable" value={meta.owner || meta.responsable} />}
-          {meta.members && <PopRow label="Équipe" value={Array.isArray(meta.members) ? meta.members.join(", ") : meta.members} />}
-          {meta.description && <div className="cal-pop-excerpt">{meta.description.slice(0, 120)}{meta.description.length > 120 ? "…" : ""}</div>}
-        </>}
-
-        {/* Demandes clubs */}
-        {sourceType === "request" && <>
-          {meta.assignedTo && <PopRow label="Assigné"     value={meta.assignedTo} />}
-          {meta.description && <div className="cal-pop-excerpt">{meta.description.slice(0, 120)}{meta.description.length > 120 ? "…" : ""}</div>}
-        </>}
+        {/* Navigation vers la fiche source — masqué si aucun module dédié */}
+        {targetPage && onNavigate && (
+          <>
+            <div className="cal-pop-sep" />
+            <button
+              className="cal-pop-action"
+              onClick={() => { onClose(); onNavigate(targetPage); }}
+            >
+              Ouvrir la fiche
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true"><path d="M3 7h8M8 4l3 3-3 3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            </button>
+          </>
+        )}
       </div>
     </div>
   );
 });
-
-function PopRow({ label, value }) {
-  if (!value) return null;
-  return (
-    <div className="cal-pop-row">
-      <span className="cal-pop-lbl">{label}</span>
-      <span className="cal-pop-val">{value}</span>
-    </div>
-  );
-}
