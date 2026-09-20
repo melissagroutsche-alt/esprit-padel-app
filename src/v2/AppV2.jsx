@@ -16,6 +16,7 @@ import DashboardV2 from "./pages/DashboardV2";
 import ObjectifsV2 from "./pages/ObjectifsV2";
 import CalendrierV2 from "./pages/CalendrierV2";
 import DemandesV2 from "./pages/DemandesV2";
+import CampagnesV2 from "./pages/CampagnesV2";
 import PlaceholderPage from "./pages/PlaceholderPage";
 import { useUsers } from "./hooks/useV1Data";
 import { useRequests, filterOpenRequests } from "./hooks/useV1Data";
@@ -158,8 +159,10 @@ const PAGE_TITLES = {
 export default function AppV2() {
   const { firebaseUser, appId, authLoading } = useAuth();
   const [currentPage, setCurrentPage] = useState("dashboard");
-  // Prépare le deep-link DemandesV2 : sera branché depuis CalendrierV2 lors d'une passe ultérieure.
-  const [selectedDemandeId, setSelectedDemandeId] = useState(null);
+  // Deep-links : permettent l'ouverture directe d'une demande ou d'une campagne
+  // depuis Calendrier ou Dashboard (connexion dans une passe ultérieure).
+  const [selectedDemandeId,   setSelectedDemandeId]   = useState(null);
+  const [selectedCampagneId,  setSelectedCampagneId]  = useState(null);
 
   // Read users to find current user profile + role
   const { users, loading: loadingUsers } = useUsers();
@@ -231,6 +234,16 @@ export default function AppV2() {
           currentUser={currentUser}
           onNavigate={setCurrentPage}
           initialSelectedId={selectedDemandeId}
+        />
+      );
+    }
+    if (currentPage === "campagnes") {
+      return (
+        <CampagnesV2
+          appId={appId}
+          currentUser={currentUser}
+          onNavigate={setCurrentPage}
+          initialSelectedId={selectedCampagneId}
         />
       );
     }

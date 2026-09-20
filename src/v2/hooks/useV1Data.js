@@ -79,6 +79,11 @@ export function useProjects() {
   return { projects: data || [], loading };
 }
 
+export function useCampagnes() {
+  const { data, loading } = useFirestoreRead("ep:campagnes");
+  return { campagnes: data || [], loading };
+}
+
 export function useCalendarEvents() {
   const { data, loading } = useFirestoreRead("ep:events");
   return { events: data || [], loading };
