@@ -2109,6 +2109,145 @@
 @media (max-width: 960px) {
   .v2-app .cal-aside { width: 196px; }
 }
+
+/* ════════════════════════════════════════════════════════
+   DEMANDES V2
+   ════════════════════════════════════════════════════════ */
+
+/* Cockpit KPI */
+.v2-app .dem-kpi-strip {
+  display: flex; gap: 10px; margin-bottom: 18px;
+}
+.v2-app .dem-kpi-tile {
+  flex: 1; background: var(--surface);
+  border: 1.5px solid var(--border); border-radius: 13px;
+  padding: 12px 14px; box-shadow: var(--shadow-xs);
+}
+.v2-app .dem-kpi-val {
+  font-size: 26px; font-weight: 800;
+  font-variant-numeric: tabular-nums; line-height: 1; color: var(--text);
+}
+.v2-app .dem-kpi-label {
+  font-size: 10.5px; font-weight: 600; color: var(--text-3); margin-top: 3px;
+}
+.v2-app .dem-kpi-rule {
+  font-size: 9.5px; color: var(--text-3); margin-top: 2px; font-weight: 400;
+}
+.v2-app .dem-kpi-tile--alert .dem-kpi-val { color: var(--red); }
+.v2-app .dem-kpi-tile--warn  .dem-kpi-val { color: #b05a00; }
+.v2-app .dem-kpi-tile--blue  .dem-kpi-val { color: var(--ep-blue); }
+
+/* Barre de filtres + recherche */
+.v2-app .dem-toolbar-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px; border-bottom: 1px solid var(--border); flex-wrap: wrap;
+}
+.v2-app .dem-search {
+  display: flex; align-items: center; gap: 6px;
+  background: var(--surface); border: 1.5px solid var(--border);
+  border-radius: 9px; padding: 6px 10px; min-width: 180px; max-width: 240px;
+  color: var(--text-3);
+}
+.v2-app .dem-search input {
+  border: none; background: none; font-size: 12px; font-family: inherit;
+  color: var(--text); flex: 1; outline: none;
+}
+.v2-app .dem-search input::placeholder { color: var(--text-3); }
+.v2-app .dem-club-select {
+  border: 1.5px solid var(--border); border-radius: 9px;
+  padding: 6px 10px; font-size: 12px; font-weight: 600;
+  font-family: inherit; background: var(--surface);
+  color: var(--text-2); cursor: pointer; outline: none;
+}
+.v2-app .dem-club-select:focus { border-color: var(--ep-blue); }
+
+/* Colonnes de table */
+.v2-app .dem-col--demand { flex: 2.5; min-width: 0; }
+.v2-app .dem-col--club   { flex: 1;   min-width: 80px; }
+.v2-app .dem-col--person { flex: 1.1; min-width: 80px; overflow: hidden; }
+.v2-app .dem-col--task   { flex: 1.3; min-width: 90px; }
+.v2-app .dem-col--date   { flex: .85; min-width: 64px; }
+
+/* Textes dans les lignes de table */
+.v2-app .dem-row-excerpt {
+  font-size: 10.5px; color: var(--text-3); margin-top: 2px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.v2-app .dem-row-club   { font-size: 11.5px; font-weight: 700; color: var(--text-2); }
+.v2-app .dem-row-person {
+  font-size: 12px; font-weight: 600; color: var(--text-2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block;
+}
+.v2-app .dem-row-empty  { color: var(--text-3); }
+
+/* Badge statut tâche */
+.v2-app .dem-task-badge {
+  display: inline-flex; align-items: center; gap: 3px;
+  font-size: 10px; font-weight: 700;
+  border-radius: 5px; padding: 2px 7px; white-space: nowrap;
+}
+
+/* Bloc tâche liée (détail) */
+.v2-app .dem-task-block {
+  border: 1.5px solid var(--border); border-radius: 13px;
+  overflow: hidden; background: var(--surface); box-shadow: var(--shadow-xs);
+}
+.v2-app .dem-task-block-header {
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 14px; background: var(--gray-bg);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-3);
+}
+.v2-app .dem-task-block-label {
+  font-size: 11px; font-weight: 800; text-transform: uppercase;
+  letter-spacing: .4px; color: var(--text-2); flex: 1;
+}
+.v2-app .dem-task-row {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 8px 14px; border-bottom: 1px solid var(--border); font-size: 12px;
+}
+.v2-app .dem-task-row:last-child { border-bottom: none; }
+.v2-app .dem-task-row--col { flex-direction: column; gap: 4px; }
+.v2-app .dem-task-lbl { color: var(--text-3); width: 80px; flex-shrink: 0; font-size: 11.5px; }
+.v2-app .dem-task-val { color: var(--text); font-weight: 600; flex: 1; }
+.v2-app .dem-task-desc { font-size: 11.5px; color: var(--text-2); line-height: 1.5; }
+
+/* Progression sous-tâches */
+.v2-app .dem-sub-prog  { display: flex; align-items: center; gap: 8px; }
+.v2-app .dem-sub-bar   { flex: 1; height: 4px; border-radius: 2px; background: var(--gray-bg); overflow: hidden; }
+.v2-app .dem-sub-fill  { height: 100%; border-radius: 2px; background: var(--ep-blue); }
+.v2-app .dem-sub-label { font-size: 10px; font-weight: 700; color: var(--text-3); flex-shrink: 0; }
+
+/* Activité */
+.v2-app .dem-activity-item {
+  display: flex; gap: 9px;
+  padding: 8px 14px; border-bottom: 1px solid var(--border); font-size: 11.5px;
+}
+.v2-app .dem-activity-item:last-child { border-bottom: none; }
+.v2-app .dem-activity-time { color: var(--text-3); flex-shrink: 0; min-width: 60px; font-size: 10.5px; }
+.v2-app .dem-activity-text { color: var(--text-2); flex: 1; line-height: 1.45; }
+.v2-app .dem-activity-user { font-weight: 700; color: var(--text); }
+
+/* Alerte retard (détail) */
+.v2-app .dem-alert-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 9px 14px; font-size: 11.5px; font-weight: 700; color: var(--red);
+}
+
+/* Empty state compact */
+.v2-app .dem-empty-sm {
+  padding: 18px 14px; text-align: center; font-size: 11.5px; color: var(--text-3);
+}
+
+@media (max-width: 960px) {
+  .v2-app .dem-kpi-strip { flex-wrap: wrap; }
+  .v2-app .dem-kpi-tile  { min-width: calc(50% - 5px); }
+}
+@media (max-width: 768px) {
+  .v2-app .dem-col--person,
+  .v2-app .dem-col--task  { display: none; }
+  .v2-app .dem-toolbar-row { gap: 8px; }
+}
 @media (max-width: 768px) {
   .v2-app .cal-aside { display: none; }
   .v2-app .cal-body { margin: 6px 8px 8px; border-radius: 8px; }
