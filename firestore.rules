@@ -1,0 +1,108 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ════════════════════════════════════════════════════════════════════════
+    // COLLECTIONS STOCK — règles strictes (P3-P6)
+    // Ces blocs sont les SEULS qui couvrent ces collections.
+    // Il n'existe aucun catch-all ci-dessous qui pourrait les court-circuiter.
+    // ════════════════════════════════════════════════════════════════════════
+
+    match /stockItems/{doc} {
+      // Lecture : tous les utilisateurs authentifiés.
+      allow read: if request.auth != null;
+      // Création / modification / suppression : admin uniquement.
+      allow create, update, delete: if request.auth != null
+                                    && request.auth.token.admin == true;
+    }
+
+    match /stockLevels/{doc} {
+      // Lecture : tous les utilisateurs authentifiés.
+      allow read: if request.auth != null;
+      // Écriture : admin uniquement pour cette passe.
+      // En P4/P5, les transactions runTransaction() s'exécutent sous l'identité
+      // du client appelant — la règle admin couvre donc aussi les transactions
+      // lancées par un admin. Si une Cloud Function serveur est introduite (P8),
+      // elle utilise le SDK Admin qui contourne les règles Firestore côté client.
+      allow write: if request.auth != null
+                   && request.auth.token.admin == true;
+    }
+
+    match /stockMovements/{doc} {
+      // Lecture : tous les utilisateurs authentifiés.
+      allow read: if request.auth != null;
+      // Ledger append-only :
+      //   create → équipe authentifiée (saisie réceptions, mouvements manuels P5)
+      //   update/delete → JAMAIS — le ledger est immuable.
+      allow create: if request.auth != null;
+      allow update, delete: if false;
+    }
+
+    match /stockReceipts/{doc} {
+      // Lecture : tous les utilisateurs authentifiés.
+      allow read: if request.auth != null;
+      // Saisie réception : équipe authentifiée pour create et update.
+      // ⚠️  Limitation connue : la règle ne vérifie pas que le champ 'by'
+      //     correspond à request.auth.uid. Pour l'imposer, P4 devra garantir
+      //     que le schéma stocke le UID Firebase dans 'by', et la règle devra
+      //     être renforcée :
+      //       allow create: if request.auth != null
+      //                     && request.resource.data.by == request.auth.uid;
+      //     À faire lors du schéma P4 — signalé explicitement.
+      allow create, update: if request.auth != null;
+      // Suppression : admin uniquement.
+      allow delete: if request.auth != null
+                    && request.auth.token.admin == true;
+    }
+
+    match /stockInventories/{doc} {
+      // Lecture : tous les utilisateurs authentifiés.
+      allow read: if request.auth != null;
+      // Création / soumission : équipe authentifiée.
+      // Validation / rejet : l'application impose ce contrôle au niveau UI
+      // (champ status modifiable par admin uniquement).
+      // ⚠️  Limitation connue : les règles ne distinguent pas encore une
+      //     mise à jour de 'status' (admin requis) d'une mise à jour ordinaire
+      //     (équipe). Pour l'imposer strictement, utiliser :
+      //       allow update: if request.auth != null
+      //                     && (
+      //                       !("status" in request.resource.data.diff(resource.data).affectedKeys())
+      //                       || request.auth.token.admin == true
+      //                     );
+      //     Nécessite Firebase Rules v2 et des tests. Planifié pour P6.
+      allow create, update: if request.auth != null;
+      allow delete: if request.auth != null
+                    && request.auth.token.admin == true;
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // LEGACY V1 — accès temporairement conservé
+    //
+    // Remplace le catch-all global précédent (allow read, write: if true).
+    // Scope réduit à la collection 'appdata' — seule collection prouvée en
+    // usage par le code V1 (useV1Data.js, useV1Write.js, fonctions Cloud).
+    //
+    // AVANT DÉPLOIEMENT — action requise :
+    //   Confirmer qu'aucune autre collection Firestore n'est accédée par V1
+    //   (formulaire guest, analytics, etc.). Si d'autres collections existent,
+    //   les ajouter comme blocs séparés ici, AVEC leur politique exacte.
+    // ════════════════════════════════════════════════════════════════════════
+
+    match /appdata/{doc} {
+      allow read, write: if true;
+    }
+
+    // ════════════════════════════════════════════════════════════════════════
+    // ABSENCE DE CATCH-ALL — intentionnelle
+    //
+    // Le catch-all original (/{document=**} allow read, write: if true) est
+    // supprimé. Les règles Firestore utilisent une logique OR : si plusieurs
+    // match couvrent un même chemin, l'accès est accordé si N'IMPORTE LEQUEL
+    // retourne true. Conserver le catch-all rendrait donc toutes les règles
+    // stock ci-dessus inefficaces — un match /{document=**} allow true
+    // l'emporterait toujours sur les restrictions spécifiques.
+    //
+    // Tout chemin non couvert par un match explicite est refusé par défaut.
+    // ════════════════════════════════════════════════════════════════════════
+  }
+}

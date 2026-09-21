@@ -37,13 +37,6 @@
       ]
     },
     {
-      "collectionGroup": "stockMovements",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "transferId", "order": "ASCENDING" }
-      ]
-    },
-    {
       "collectionGroup": "stockReceipts",
       "queryScope": "COLLECTION",
       "fields": [
