@@ -21,11 +21,13 @@ import {
   createRessource, updateRessource,
   toggleRessourcePublished, archiveRessource,
 } from "../hooks/useV1Write";
-import { useStockItems } from "../hooks/useStockData";
+import { useStockItems, useStockReceipts } from "../hooks/useStockData";
 import { createStockItem, updateStockItem } from "../hooks/useStockWrite";
+import { createReceipt, submitReceipt, validateReceiptTx, rejectReceipt } from "../hooks/useReceiptWrite";
+import { useAuth } from "../../auth/AuthContext";
 import {
   IconFolder, IconSearch, IconPlus, IconX, IconExternalLink,
-  IconChevronRight, IconSettings, IconLayers,
+  IconChevronRight, IconSettings, IconLayers, IconInbox, IconCheckSquare,
 } from "../icons";
 
 /* ─────────────────────────────────────
@@ -1709,12 +1711,528 @@ function ArticlePanel({ initial, allItems, campagnes, events, appId, onClose, on
 }
 
 /* ─────────────────────────────────────
+   P4 — RÉCEPTIONS : HELPERS
+───────────────────────────────────── */
+const RECEIPT_STATUS_LABEL = {
+  pending:   "En attente",
+  submitted: "Soumis",
+  validated: "Validé",
+  rejected:  "Rejeté",
+};
+
+function resolveItem(items, itemId) {
+  return items.find(i => i.id === itemId) || null;
+}
+function resolveVariant(item, variantId) {
+  if (!item) return null;
+  return (item.variants || []).find(v => v.id === variantId) || null;
+}
+function resolveClubR(clubs, clubId) {
+  return clubs.find(c => String(c.id) === String(clubId) || String(c.appId) === String(clubId)) || null;
+}
+function variantLabel(v) {
+  if (!v) return null;
+  const d = v.dimensions || {};
+  const parts = [d.taille, d.genre, d.couleur, d.modele, d.annee].filter(Boolean);
+  return v.label || parts.join(" · ") || "Variante";
+}
+function fmtReceiptDate(iso) {
+  if (!iso) return "—";
+  try { return new Date(iso).toLocaleDateString("fr-FR", { day: "2-digit", month: "short", year: "numeric" }); }
+  catch { return "—"; }
+}
+
+/* Badge statut réception */
+function ReceiptStatusBadge({ status }) {
+  const mod = { pending: "pending", submitted: "submitted", validated: "validated", rejected: "rejected" }[status] || "pending";
+  return <span className={`rcpt-badge rcpt-badge--${mod}`}>{RECEIPT_STATUS_LABEL[status] || status}</span>;
+}
+
+/* Carte réception dans la liste */
+function ReceiptCard({ receipt, items, clubs, selected, onClick }) {
+  const item    = resolveItem(items, receipt.itemId);
+  const variant = resolveVariant(item, receipt.variantId);
+  const club    = resolveClubR(clubs, receipt.clubId);
+  const hasDelta = receipt.delta !== null && receipt.delta !== 0;
+
+  return (
+    <button
+      className={`rcpt-card${selected ? " rcpt-card--selected" : ""}${hasDelta ? " rcpt-card--delta" : ""}`}
+      onClick={() => onClick(receipt)}
+    >
+      <div className="rcpt-card__top">
+        <div className="rcpt-card__name">
+          {item ? item.name : <span className="rcpt-card__missing">Article introuvable</span>}
+          {variant
+            ? <span className="rcpt-card__variant"> · {variantLabel(variant)}</span>
+            : <span className="rcpt-card__missing-small"> · Variante indisponible</span>}
+        </div>
+        <ReceiptStatusBadge status={receipt.status} />
+      </div>
+      <div className="rcpt-card__meta">
+        <span className="rcpt-card__club">{club ? club.name : <span className="rcpt-card__missing-small">Club introuvable</span>}</span>
+        <span className="rcpt-card__qty">
+          Prévu : <strong>{receipt.plannedQty}</strong>
+          {receipt.receivedQty !== null && (
+            <> · Reçu : <strong>{receipt.receivedQty}</strong></>
+          )}
+          {hasDelta && (
+            <span className={`rcpt-card__delta ${receipt.delta > 0 ? "rcpt-card__delta--pos" : "rcpt-card__delta--neg"}`}>
+              {receipt.delta > 0 ? "+" : ""}{receipt.delta}
+            </span>
+          )}
+        </span>
+      </div>
+    </button>
+  );
+}
+
+/* Panneau création réception (admin) */
+function ReceiptCreatePanel({ items, clubs, campagnes, events, appId, onClose, onSaved }) {
+  const [form,   setForm]   = useState({ itemId: "", variantId: "", clubId: "", plannedQty: "" });
+  const [saving, setSaving] = useState(false);
+  const [err,    setErr]    = useState("");
+
+  const selectedItem = items.find(i => i.id === form.itemId) || null;
+  const variants     = selectedItem ? (selectedItem.variants || []).filter(v => v.active !== false) : [];
+
+  function setF(k, v) { setForm(f => ({ ...f, [k]: v })); }
+
+  function handleItemChange(e) {
+    setF("itemId", e.target.value);
+    setF("variantId", "");
+  }
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setErr("");
+    setSaving(true);
+    try {
+      const item = items.find(i => i.id === form.itemId);
+      await createReceipt({
+        itemId:     form.itemId,
+        variantId:  form.variantId,
+        clubId:     form.clubId,
+        plannedQty: form.plannedQty,
+        campaignId: item?.campaignId || null,
+        eventId:    item?.eventId    || null,
+      }, appId);
+      onSaved();
+    } catch (e2) {
+      setErr(e2.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const camp = selectedItem ? campagnes.find(c => String(c.id) === String(selectedItem.campaignId)) : null;
+  const ev   = selectedItem ? events.find(e => String(e.id) === String(selectedItem.eventId)) : null;
+
+  return (
+    <div className="stk-panel rcpt-panel-create">
+      <div className="stk-panel__head">
+        <span className="stk-panel__title">Préparer une réception</span>
+        <button className="stk-panel__close" onClick={onClose}><IconX size={16} /></button>
+      </div>
+      <form className="stk-panel__body" onSubmit={handleSubmit}>
+        <div className="stk-panel__section">Identification</div>
+
+        <div className="camp-form-group">
+          <label className="camp-form-label">Article *</label>
+          <select className="camp-form-input" value={form.itemId} onChange={handleItemChange} required>
+            <option value="">— Choisir un article —</option>
+            {items.map(i => <option key={i.id} value={i.id}>{i.name} ({i.sku})</option>)}
+          </select>
+        </div>
+
+        <div className="camp-form-group">
+          <label className="camp-form-label">Variante *</label>
+          <select className="camp-form-input" value={form.variantId} onChange={e => setF("variantId", e.target.value)} required disabled={!form.itemId}>
+            <option value="">— Choisir une variante —</option>
+            {variants.map(v => <option key={v.id} value={v.id}>{variantLabel(v)}</option>)}
+          </select>
+          {selectedItem && variants.length === 0 && (
+            <p className="camp-form-hint" style={{ color: "var(--ep-blue)" }}>Aucune variante active sur cet article.</p>
+          )}
+        </div>
+
+        <div className="camp-form-group">
+          <label className="camp-form-label">Club réceptionnaire *</label>
+          <select className="camp-form-input" value={form.clubId} onChange={e => setF("clubId", e.target.value)} required>
+            <option value="">— Choisir un club —</option>
+            {clubs.map(c => <option key={c.id} value={String(c.id)}>{c.name}</option>)}
+          </select>
+        </div>
+
+        {(camp || ev) && (
+          <div className="rcpt-create__link-info">
+            <span className="stk-panel__section" style={{ marginTop: 0 }}>Lié à</span>
+            {camp && <span className="rcpt-create__link-val">{camp.name}</span>}
+            {ev   && <span className="rcpt-create__link-val">{ev.title || ev.name}</span>}
+          </div>
+        )}
+
+        <div className="stk-panel__section">Quantité</div>
+        <div className="camp-form-group">
+          <label className="camp-form-label">Quantité prévue *</label>
+          <input className="camp-form-input" type="number" min="0" step="1"
+            value={form.plannedQty} onChange={e => setF("plannedQty", e.target.value)} required placeholder="0" />
+        </div>
+
+        {err && <div className="camp-form-error">{err}</div>}
+
+        <div className="stk-panel__footer" style={{ padding: "14px 0 0", border: "none" }}>
+          <button type="button" className="camp-btn camp-btn--ghost" onClick={onClose}>Annuler</button>
+          <button type="submit" className="camp-btn camp-btn--primary" disabled={saving}>
+            {saving ? <span className="v2-spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> : "Créer la réception"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+/* Panneau détail réception (soumission équipe + validation admin) */
+function ReceiptDetailPanel({ receipt, items, clubs, appId, authUid, isAdmin, onClose, onUpdated }) {
+  const item    = resolveItem(items, receipt.itemId);
+  const variant = resolveVariant(item, receipt.variantId);
+  const club    = resolveClubR(clubs, receipt.clubId);
+
+  const [receivedQty,    setReceivedQty]    = useState(receipt.receivedQty !== null ? String(receipt.receivedQty) : "");
+  const [deltaNote,      setDeltaNote]      = useState(receipt.deltaNote || "");
+  const [rejectionNote,  setRejectionNote]  = useState("");
+  const [showRejectForm, setShowRejectForm] = useState(false);
+  const [saving,         setSaving]         = useState(false);
+  const [err,            setErr]            = useState("");
+
+  const liveQty   = receivedQty !== "" ? Number(receivedQty) : null;
+  const liveDelta = liveQty !== null ? liveQty - receipt.plannedQty : null;
+  const needNote  = liveDelta !== null && liveDelta !== 0;
+
+  async function handleSubmit() {
+    setErr("");
+    setSaving(true);
+    try {
+      await submitReceipt(receipt.id, Number(receivedQty), deltaNote, receipt.plannedQty, authUid);
+      onUpdated();
+      onClose();
+    } catch (e) { setErr(e.message); }
+    finally { setSaving(false); }
+  }
+
+  async function handleValidate() {
+    setErr("");
+    setSaving(true);
+    try {
+      await validateReceiptTx(receipt.id, appId);
+      onUpdated();
+      onClose();
+    } catch (e) { setErr(e.message); }
+    finally { setSaving(false); }
+  }
+
+  async function handleReject() {
+    setErr("");
+    setSaving(true);
+    try {
+      await rejectReceipt(receipt.id, rejectionNote, appId);
+      onUpdated();
+      onClose();
+    } catch (e) { setErr(e.message); }
+    finally { setSaving(false); }
+  }
+
+  const canSubmit = receipt.status === "pending" && !isAdmin && liveQty !== null && liveQty >= 0 && (!needNote || deltaNote.trim());
+  const canAct    = receipt.status === "submitted" && isAdmin;
+  const isReadOnly = receipt.status === "validated" || receipt.status === "rejected";
+
+  return (
+    <div className="stk-panel rcpt-panel-detail">
+      <div className="stk-panel__head">
+        <span className="stk-panel__title">Réception</span>
+        <button className="stk-panel__close" onClick={onClose}><IconX size={16} /></button>
+      </div>
+
+      <div className="stk-panel__body">
+        {/* En-tête article */}
+        <div className="rcpt-detail__article">
+          {item
+            ? <><span className="rcpt-detail__item-name">{item.name}</span><span className="rcpt-detail__sku">{item.sku}</span></>
+            : <span className="rcpt-card__missing">Article introuvable</span>}
+          <div className="rcpt-detail__variant">
+            {variant
+              ? variantLabel(variant)
+              : <span className="rcpt-card__missing-small">Variante indisponible</span>}
+          </div>
+          <div className="rcpt-detail__club">
+            {club ? club.name : <span className="rcpt-card__missing-small">Club introuvable</span>}
+          </div>
+        </div>
+
+        <ReceiptStatusBadge status={receipt.status} />
+
+        {/* Quantités */}
+        <div className="stk-panel__section" style={{ marginTop: 16 }}>Quantités</div>
+        <div className="rcpt-qty-grid">
+          <div className="rcpt-qty-cell">
+            <div className="rcpt-qty-cell__label">Attendu</div>
+            <div className="rcpt-qty-cell__val">{receipt.plannedQty}</div>
+          </div>
+          <div className="rcpt-qty-cell">
+            <div className="rcpt-qty-cell__label">Reçu</div>
+            {receipt.status === "pending" && !isAdmin ? (
+              <input className="rcpt-qty-input" type="number" min="0" step="1"
+                value={receivedQty} onChange={e => setReceivedQty(e.target.value)} placeholder="0" />
+            ) : (
+              <div className="rcpt-qty-cell__val">{receipt.receivedQty !== null ? receipt.receivedQty : "—"}</div>
+            )}
+          </div>
+          <div className="rcpt-qty-cell">
+            <div className="rcpt-qty-cell__label">Écart</div>
+            <div className={`rcpt-qty-cell__val rcpt-qty-cell__val--delta${liveDelta !== null ? (liveDelta > 0 ? " pos" : liveDelta < 0 ? " neg" : " zero") : ""}`}>
+              {receipt.status === "pending" && !isAdmin
+                ? (liveDelta !== null ? (liveDelta > 0 ? "+" : "") + liveDelta : "—")
+                : (receipt.delta !== null ? (receipt.delta > 0 ? "+" : "") + receipt.delta : "—")}
+            </div>
+          </div>
+        </div>
+
+        {/* Note d'écart */}
+        {(needNote || (receipt.deltaNote && receipt.delta !== 0)) && (
+          <>
+            <div className="stk-panel__section">Note d'écart{needNote && !isReadOnly ? " *" : ""}</div>
+            {receipt.status === "pending" && !isAdmin ? (
+              <textarea className="camp-form-input rcpt-note-input" rows={3}
+                placeholder="Expliquez l'écart constaté…"
+                value={deltaNote} onChange={e => setDeltaNote(e.target.value)} />
+            ) : (
+              <p className="rcpt-detail__note">{receipt.deltaNote || "—"}</p>
+            )}
+          </>
+        )}
+
+        {/* Rejet — formulaire */}
+        {showRejectForm && (
+          <>
+            <div className="stk-panel__section">Note de rejet *</div>
+            <textarea className="camp-form-input rcpt-note-input" rows={3}
+              placeholder="Motif du rejet…"
+              value={rejectionNote} onChange={e => setRejectionNote(e.target.value)} />
+          </>
+        )}
+
+        {/* Note de rejet affichée */}
+        {receipt.status === "rejected" && receipt.rejectionNote && (
+          <>
+            <div className="stk-panel__section">Motif du rejet</div>
+            <p className="rcpt-detail__note rcpt-detail__note--reject">{receipt.rejectionNote}</p>
+          </>
+        )}
+
+        {/* Audit trail */}
+        <div className="stk-panel__section" style={{ marginTop: 16 }}>Historique</div>
+        <div className="rcpt-timeline">
+          <div className="rcpt-timeline__row">
+            <span className="rcpt-timeline__dot rcpt-timeline__dot--done" />
+            <span className="rcpt-timeline__label">Créée</span>
+            <span className="rcpt-timeline__date">{fmtDate(receipt.createdAt)}</span>
+          </div>
+          {receipt.submittedAt && (
+            <div className="rcpt-timeline__row">
+              <span className="rcpt-timeline__dot rcpt-timeline__dot--done" />
+              <span className="rcpt-timeline__label">Soumise</span>
+              <span className="rcpt-timeline__date">{fmtDate(receipt.submittedAt)}</span>
+            </div>
+          )}
+          {receipt.validatedAt && (
+            <div className="rcpt-timeline__row">
+              <span className="rcpt-timeline__dot rcpt-timeline__dot--validated" />
+              <span className="rcpt-timeline__label">Validée</span>
+              <span className="rcpt-timeline__date">{fmtDate(receipt.validatedAt)}</span>
+            </div>
+          )}
+          {receipt.rejectedAt && (
+            <div className="rcpt-timeline__row">
+              <span className="rcpt-timeline__dot rcpt-timeline__dot--rejected" />
+              <span className="rcpt-timeline__label">Rejetée</span>
+              <span className="rcpt-timeline__date">{fmtDate(receipt.rejectedAt)}</span>
+            </div>
+          )}
+        </div>
+
+        {err && <div className="camp-form-error" style={{ marginTop: 8 }}>{err}</div>}
+      </div>
+
+      {/* Actions */}
+      {!isReadOnly && (
+        <div className="stk-panel__footer">
+          {receipt.status === "pending" && !isAdmin && (
+            <>
+              <button className="camp-btn camp-btn--ghost" onClick={onClose}>Annuler</button>
+              <button className="camp-btn camp-btn--primary" disabled={!canSubmit || saving} onClick={handleSubmit}>
+                {saving ? <span className="v2-spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> : "Soumettre"}
+              </button>
+            </>
+          )}
+          {canAct && !showRejectForm && (
+            <>
+              <button className="camp-btn camp-btn--ghost rcpt-btn-reject" disabled={saving} onClick={() => setShowRejectForm(true)}>
+                Rejeter
+              </button>
+              <button className="camp-btn stk-add-btn" disabled={saving} onClick={handleValidate}>
+                {saving ? <span className="v2-spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> : <><IconCheckSquare size={14} /> Valider</>}
+              </button>
+            </>
+          )}
+          {canAct && showRejectForm && (
+            <>
+              <button className="camp-btn camp-btn--ghost" disabled={saving} onClick={() => setShowRejectForm(false)}>Annuler</button>
+              <button className="camp-btn camp-btn--danger" disabled={!rejectionNote.trim() || saving} onClick={handleReject}>
+                {saving ? <span className="v2-spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> : "Confirmer le rejet"}
+              </button>
+            </>
+          )}
+          {receipt.status === "pending" && isAdmin && (
+            <button className="camp-btn camp-btn--ghost" onClick={onClose}>Fermer</button>
+          )}
+        </div>
+      )}
+      {isReadOnly && (
+        <div className="stk-panel__footer">
+          <button className="camp-btn camp-btn--ghost" onClick={onClose}>Fermer</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* Vue principale Réceptions */
+function ReceiptsView({ currentUser, appId, authUid, items, clubs, campagnes, events }) {
+  const isAdmin = currentUser?.admin === true;
+  const { receipts, loading, error } = useStockReceipts();
+
+  const [selectedId,   setSelectedId]   = useState(null);
+  const [showCreate,   setShowCreate]   = useState(false);
+  const [refreshKey,   setRefreshKey]   = useState(0);
+
+  function handleUpdated() { setRefreshKey(k => k + 1); }
+
+  const selectedReceipt = useMemo(
+    () => receipts.find(r => r.id === selectedId) || null,
+    [receipts, selectedId, refreshKey]
+  );
+
+  // Groupes selon statut + delta
+  const groups = useMemo(() => ({
+    toCheck:   receipts.filter(r => r.status === "submitted" && (r.delta === 0 || r.delta === null)),
+    withDelta: receipts.filter(r => r.status === "submitted" && r.delta !== null && r.delta !== 0),
+    validated: receipts.filter(r => r.status === "validated"),
+    pending:   receipts.filter(r => r.status === "pending"),
+    rejected:  receipts.filter(r => r.status === "rejected"),
+  }), [receipts, refreshKey]);
+
+  function renderGroup(title, list, mod) {
+    if (list.length === 0) return null;
+    return (
+      <div className="rcpt-group" key={title}>
+        <div className={`rcpt-group__header rcpt-group__header--${mod}`}>
+          <span className="rcpt-group__title">{title}</span>
+          <span className="rcpt-group__count">{list.length}</span>
+        </div>
+        {list.map(r => (
+          <ReceiptCard
+            key={r.id}
+            receipt={r}
+            items={items}
+            clubs={clubs}
+            selected={selectedId === r.id}
+            onClick={r2 => { setSelectedId(r2.id); setShowCreate(false); }}
+          />
+        ))}
+      </div>
+    );
+  }
+
+  const isEmpty = receipts.length === 0;
+
+  return (
+    <div className="stk-content">
+      <div className="stk-list-col">
+        {/* Filtres / actions */}
+        <div className="rcpt-list-header">
+          {isAdmin && (
+            <button className="camp-btn stk-add-btn" onClick={() => { setShowCreate(true); setSelectedId(null); }}>
+              <IconPlus size={14} /> Préparer une réception
+            </button>
+          )}
+        </div>
+
+        {loading ? (
+          <div className="stk-loading"><div className="v2-spinner" /></div>
+        ) : error ? (
+          <div className="stk-error">Erreur : {error.message}</div>
+        ) : isEmpty ? (
+          <div className="stk-empty">
+            <div className="stk-empty__icon"><IconInbox size={22} /></div>
+            <span className="stk-empty__title">Aucune réception</span>
+            <span className="stk-empty__sub">
+              {isAdmin
+                ? "Préparez la première réception pour commencer à suivre les entrées de stock."
+                : "Aucune réception en cours pour l'instant."}
+            </span>
+          </div>
+        ) : (
+          <div className="rcpt-list">
+            {renderGroup("Avec écart", groups.withDelta, "delta")}
+            {renderGroup("À vérifier", groups.toCheck, "check")}
+            {renderGroup("En attente", groups.pending, "pending")}
+            {renderGroup("Validées", groups.validated, "validated")}
+            {renderGroup("Rejetées", groups.rejected, "rejected")}
+          </div>
+        )}
+      </div>
+
+      {/* Panneau création */}
+      {showCreate && isAdmin && (
+        <ReceiptCreatePanel
+          items={items}
+          clubs={clubs}
+          campagnes={campagnes}
+          events={events}
+          appId={appId}
+          onClose={() => setShowCreate(false)}
+          onSaved={() => { handleUpdated(); setShowCreate(false); }}
+        />
+      )}
+
+      {/* Panneau détail */}
+      {selectedReceipt && !showCreate && (
+        <ReceiptDetailPanel
+          key={selectedReceipt.id + refreshKey}
+          receipt={selectedReceipt}
+          items={items}
+          clubs={clubs}
+          appId={appId}
+          authUid={authUid}
+          isAdmin={isAdmin}
+          onClose={() => setSelectedId(null)}
+          onUpdated={handleUpdated}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────
    STOCKS VIEW (page principale)
 ───────────────────────────────────── */
-function StocksView({ currentUser, appId, campagnes, events, onBack }) {
+function StocksView({ currentUser, appId, campagnes, events, clubs, onBack }) {
   const isAdmin = currentUser?.admin === true;
+  const { firebaseUser } = useAuth();
+  const authUid = firebaseUser?.uid || null;
   const { items, loading, error } = useStockItems();
 
+  const [stockView,    setStockView]   = useState("articles"); // "articles" | "receipts"
   const [search,       setSearch]      = useState("");
   const [filterCamp,   setFilterCamp]  = useState("");
   const [filterEvent,  setFilterEvent] = useState("");
@@ -1776,11 +2294,23 @@ function StocksView({ currentUser, appId, campagnes, events, onBack }) {
             <p className="stk-header__sub">Ressources physiques liées aux campagnes et événements</p>
           </div>
         </div>
-        {isAdmin && (
+        {isAdmin && stockView === "articles" && (
           <button className="camp-btn stk-add-btn" onClick={() => setShowCreate(true)}>
             <IconPlus size={14} /> Nouvel article
           </button>
         )}
+      </div>
+
+      {/* ── Tabs ── */}
+      <div className="stk-tabs">
+        <button className={`stk-tab${stockView === "articles" ? " stk-tab--active" : ""}`}
+          onClick={() => setStockView("articles")}>
+          <IconLayers size={13} /> Articles
+        </button>
+        <button className={`stk-tab${stockView === "receipts" ? " stk-tab--active" : ""}`}
+          onClick={() => setStockView("receipts")}>
+          <IconInbox size={13} /> Réceptions
+        </button>
       </div>
 
       {/* ── KPI ── */}
@@ -1804,8 +2334,20 @@ function StocksView({ currentUser, appId, campagnes, events, onBack }) {
         </div>
       </div>
 
-      {/* ── Contenu : liste + détail ── */}
-      <div className="stk-content">
+      {/* ── Contenu selon onglet ── */}
+      {stockView === "receipts" ? (
+        <ReceiptsView
+          currentUser={currentUser}
+          appId={appId}
+          authUid={authUid}
+          items={items}
+          clubs={clubs}
+          campagnes={campagnes}
+          events={events}
+        />
+      ) : null}
+
+      {stockView === "articles" && <div className="stk-content">
         {/* Colonne liste */}
         <div className="stk-list-col">
           {/* Filtres */}
@@ -1869,13 +2411,12 @@ function StocksView({ currentUser, appId, campagnes, events, onBack }) {
             </div>
           )}
 
-          {/* Prochaines étapes P4-P6 */}
+          {/* Prochaines étapes P5-P6 (P4 Réceptions est actif) */}
           {!loading && (
             <div className="stk-upcoming-row">
               {[
-                { label: "Réceptions fournisseurs", desc: "Saisir et valider les réceptions de matériel.", phase: "P4", mod: "p4" },
-                { label: "Mouvements & transferts",  desc: "Déplacements inter-clubs, sorties de stock.",   phase: "P5", mod: "p5" },
-                { label: "Inventaires",               desc: "Comptage et ajustement des niveaux réels.",     phase: "P6", mod: "p6" },
+                { label: "Mouvements & transferts", desc: "Déplacements inter-clubs, sorties de stock.", phase: "P5", mod: "p5" },
+                { label: "Inventaires",              desc: "Comptage et ajustement des niveaux réels.",  phase: "P6", mod: "p6" },
               ].map(s => (
                 <div key={s.label} className={`stk-upcoming-card stk-upcoming-card--${s.mod}`}>
                   <div className="stk-upcoming-card__top">
@@ -1919,9 +2460,10 @@ function StocksView({ currentUser, appId, campagnes, events, onBack }) {
           />
         )}
       </div>
+      }
 
-      {/* Panneau création */}
-      {showCreate && isAdmin && (
+      {/* Panneau création article (hors stk-content pour positionnement fixe) */}
+      {stockView === "articles" && showCreate && isAdmin && (
         <ArticlePanel
           allItems={items}
           campagnes={campagnes}
@@ -2028,6 +2570,7 @@ export default function RessourcesV2({ currentUser, appId }) {
             appId={appId}
             campagnes={campagnes}
             events={events}
+            clubs={clubs}
             onBack={() => setMode("cockpit")}
           />
         ) : (

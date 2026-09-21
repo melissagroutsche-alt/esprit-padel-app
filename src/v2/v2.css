@@ -3724,3 +3724,110 @@
   .v2-app .stk-vform__grid { grid-template-columns: 1fr; }
   .v2-app .stk-panel__grid { grid-template-columns: 1fr; }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   P4 — RÉCEPTIONS
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ── Tabs Articles / Réceptions ──────────────────────────────────────── */
+.v2-app .stk-tabs { display: flex; gap: 4px; padding: 0 0 16px; }
+.v2-app .stk-tab { display: flex; align-items: center; gap: 6px; padding: 6px 14px; border-radius: 20px; border: 1px solid var(--border); background: var(--surface); color: var(--text-2); font-size: 13px; font-weight: 500; cursor: pointer; transition: background 0.12s, color 0.12s, border-color 0.12s; }
+.v2-app .stk-tab:hover { background: var(--bg); color: var(--text-1); }
+.v2-app .stk-tab--active { background: var(--ep-dark, #2D2D30); color: #fff; border-color: var(--ep-dark, #2D2D30); }
+
+/* ── Badge statut réception ──────────────────────────────────────────── */
+.v2-app .rcpt-badge { display: inline-flex; align-items: center; font-size: 11px; font-weight: 700; letter-spacing: 0.03em; padding: 2px 8px; border-radius: 10px; text-transform: uppercase; white-space: nowrap; }
+.v2-app .rcpt-badge--pending   { background: #F1F5F9; color: #64748B; }
+.v2-app .rcpt-badge--submitted { background: #FFF7ED; color: #C2410C; border: 1px solid #FED7AA; }
+.v2-app .rcpt-badge--validated { background: #ECFDF5; color: #059669; border: 1px solid #A7F3D0; }
+.v2-app .rcpt-badge--rejected  { background: #FEF2F2; color: #DC2626; border: 1px solid #FECACA; }
+
+/* ── Carte réception ─────────────────────────────────────────────────── */
+.v2-app .rcpt-card { width: 100%; text-align: left; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; cursor: pointer; transition: border-color 0.12s, box-shadow 0.12s; display: flex; flex-direction: column; gap: 6px; }
+.v2-app .rcpt-card:hover { border-color: var(--ep-blue); }
+.v2-app .rcpt-card--selected { border-color: var(--ep-blue); box-shadow: 0 0 0 2px rgba(15,86,184,0.10); }
+.v2-app .rcpt-card--delta { border-left: 3px solid #F97316; }
+.v2-app .rcpt-card__top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.v2-app .rcpt-card__name { font-size: 13px; font-weight: 600; color: var(--text-1); flex: 1; }
+.v2-app .rcpt-card__variant { font-weight: 400; color: var(--text-2); }
+.v2-app .rcpt-card__meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.v2-app .rcpt-card__club { font-size: 12px; color: var(--text-2); }
+.v2-app .rcpt-card__qty { font-size: 12px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.v2-app .rcpt-card__delta { display: inline-block; margin-left: 6px; font-weight: 700; font-size: 12px; }
+.v2-app .rcpt-card__delta--pos { color: #059669; }
+.v2-app .rcpt-card__delta--neg { color: #DC2626; }
+.v2-app .rcpt-card__missing { color: #DC2626; font-size: 12px; font-style: italic; }
+.v2-app .rcpt-card__missing-small { color: #EF4444; font-size: 11px; font-style: italic; }
+
+/* ── Groupes ─────────────────────────────────────────────────────────── */
+.v2-app .rcpt-list { display: flex; flex-direction: column; gap: 16px; }
+.v2-app .rcpt-group { display: flex; flex-direction: column; gap: 6px; }
+.v2-app .rcpt-group__header { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+.v2-app .rcpt-group__title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; }
+.v2-app .rcpt-group__count { font-size: 11px; font-weight: 600; border-radius: 9px; padding: 1px 7px; }
+.v2-app .rcpt-group__header--delta .rcpt-group__title { color: #C2410C; }
+.v2-app .rcpt-group__header--delta .rcpt-group__count { background: #FFF7ED; color: #C2410C; }
+.v2-app .rcpt-group__header--check .rcpt-group__title { color: var(--ep-blue); }
+.v2-app .rcpt-group__header--check .rcpt-group__count { background: #EFF6FF; color: var(--ep-blue); }
+.v2-app .rcpt-group__header--pending .rcpt-group__title { color: var(--text-2); }
+.v2-app .rcpt-group__header--pending .rcpt-group__count { background: var(--bg); color: var(--text-2); }
+.v2-app .rcpt-group__header--validated .rcpt-group__title { color: #059669; }
+.v2-app .rcpt-group__header--validated .rcpt-group__count { background: #ECFDF5; color: #059669; }
+.v2-app .rcpt-group__header--rejected .rcpt-group__title { color: var(--text-3); }
+.v2-app .rcpt-group__header--rejected .rcpt-group__count { background: var(--bg); color: var(--text-3); }
+
+/* ── En-tête liste réceptions ────────────────────────────────────────── */
+.v2-app .rcpt-list-header { display: flex; justify-content: flex-end; margin-bottom: 12px; }
+
+/* ── Panneau création ────────────────────────────────────────────────── */
+.v2-app .rcpt-create__link-info { display: flex; flex-direction: column; gap: 4px; background: #EFF6FF; border: 1px solid #BFDBFE; border-radius: 8px; padding: 8px 12px; }
+.v2-app .rcpt-create__link-val { font-size: 12px; color: var(--ep-blue); font-weight: 500; }
+
+/* ── Panneau détail ──────────────────────────────────────────────────── */
+.v2-app .rcpt-detail__article { display: flex; flex-direction: column; gap: 3px; }
+.v2-app .rcpt-detail__item-name { font-size: 15px; font-weight: 700; color: var(--text-1); }
+.v2-app .rcpt-detail__sku { font-size: 11px; color: var(--text-3); font-weight: 400; }
+.v2-app .rcpt-detail__variant { font-size: 13px; color: var(--text-2); margin-top: 2px; }
+.v2-app .rcpt-detail__club { font-size: 12px; color: var(--text-2); margin-top: 2px; font-weight: 500; }
+
+/* ── Grille quantités ────────────────────────────────────────────────── */
+.v2-app .rcpt-qty-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin: 4px 0; }
+.v2-app .rcpt-qty-cell { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; }
+.v2-app .rcpt-qty-cell__label { font-size: 11px; font-weight: 600; color: var(--text-2); text-transform: uppercase; letter-spacing: 0.05em; }
+.v2-app .rcpt-qty-cell__val { font-size: 20px; font-weight: 700; color: var(--text-1); font-variant-numeric: tabular-nums; }
+.v2-app .rcpt-qty-cell__val--delta.pos { color: #059669; }
+.v2-app .rcpt-qty-cell__val--delta.neg { color: #DC2626; }
+.v2-app .rcpt-qty-cell__val--delta.zero { color: var(--text-2); }
+.v2-app .rcpt-qty-input { width: 100%; font-size: 20px; font-weight: 700; border: none; background: transparent; color: var(--text-1); padding: 0; font-variant-numeric: tabular-nums; outline: none; }
+.v2-app .rcpt-qty-input:focus { outline: none; border-bottom: 2px solid var(--ep-blue); }
+
+/* ── Note ────────────────────────────────────────────────────────────── */
+.v2-app .rcpt-note-input { width: 100%; resize: vertical; min-height: 72px; }
+.v2-app .rcpt-detail__note { font-size: 13px; color: var(--text-1); background: var(--bg); border-radius: 6px; padding: 8px 10px; margin: 0; line-height: 1.5; }
+.v2-app .rcpt-detail__note--reject { background: #FEF2F2; border: 1px solid #FECACA; color: #DC2626; }
+
+/* ── Bouton Rejeter ──────────────────────────────────────────────────── */
+.v2-app .rcpt-btn-reject { color: #DC2626; border-color: #FECACA; }
+.v2-app .rcpt-btn-reject:hover { background: #FEF2F2; }
+.v2-app .camp-btn--danger { background: #DC2626; color: #fff; border-color: #DC2626; }
+.v2-app .camp-btn--danger:hover:not(:disabled) { background: #B91C1C; }
+.v2-app .camp-btn--danger:disabled { opacity: 0.5; }
+
+/* ── Timeline audit ──────────────────────────────────────────────────── */
+.v2-app .rcpt-timeline { display: flex; flex-direction: column; gap: 8px; }
+.v2-app .rcpt-timeline__row { display: flex; align-items: center; gap: 10px; font-size: 12px; }
+.v2-app .rcpt-timeline__dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.v2-app .rcpt-timeline__dot--done { background: var(--ep-blue); }
+.v2-app .rcpt-timeline__dot--validated { background: #059669; }
+.v2-app .rcpt-timeline__dot--rejected  { background: #DC2626; }
+.v2-app .rcpt-timeline__label { flex: 1; color: var(--text-2); font-weight: 500; }
+.v2-app .rcpt-timeline__date  { color: var(--text-3); font-variant-numeric: tabular-nums; }
+
+/* ── Responsive ──────────────────────────────────────────────────────── */
+@media (max-width: 900px) {
+  .v2-app .rcpt-qty-grid { grid-template-columns: 1fr 1fr 1fr; }
+}
+@media (max-width: 600px) {
+  .v2-app .stk-tabs { flex-wrap: wrap; }
+  .v2-app .rcpt-qty-grid { grid-template-columns: 1fr 1fr; }
+}

@@ -41,16 +41,40 @@ service cloud.firestore {
     match /stockReceipts/{doc} {
       // Lecture : tous les utilisateurs authentifiés.
       allow read: if request.auth != null;
-      // Saisie réception : équipe authentifiée pour create et update.
-      // ⚠️  Limitation connue : la règle ne vérifie pas que le champ 'by'
-      //     correspond à request.auth.uid. Pour l'imposer, P4 devra garantir
-      //     que le schéma stocke le UID Firebase dans 'by', et la règle devra
-      //     être renforcée :
-      //       allow create: if request.auth != null
-      //                     && request.resource.data.by == request.auth.uid;
-      //     À faire lors du schéma P4 — signalé explicitement.
-      allow create, update: if request.auth != null;
-      // Suppression : admin uniquement.
+
+      // Création : admin uniquement (prépare la réception attendue).
+      allow create: if request.auth != null
+                    && request.auth.token.admin == true;
+
+      // Mise à jour : deux branches strictement séparées.
+      allow update: if request.auth != null && (
+
+        // ── Branche équipe — soumission uniquement ────────────────────────
+        // Un non-admin peut uniquement passer pending → submitted
+        // en modifiant exclusivement les champs de saisie autorisés.
+        (
+          request.auth.token.admin != true
+          // Transition : pending → submitted uniquement
+          && resource.data.status == "pending"
+          && request.resource.data.status == "submitted"
+          // Seuls ces champs peuvent changer (tous les autres sont immuables)
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(["receivedQty", "delta", "deltaNote",
+                          "status", "submittedAt", "submittedBy"])
+          // Invariants métier vérifiables côté règle
+          && request.resource.data.receivedQty >= 0
+          && request.resource.data.delta ==
+               request.resource.data.receivedQty - resource.data.plannedQty
+          && (request.resource.data.delta == 0
+              || request.resource.data.deltaNote.size() > 0)
+          && request.resource.data.submittedBy == request.auth.uid
+        )
+
+        // ── Branche admin — validation, rejet, corrections ────────────────
+        || request.auth.token.admin == true
+      );
+
+      // Suppression : admin uniquement (réceptions pending non soumises uniquement).
       allow delete: if request.auth != null
                     && request.auth.token.admin == true;
     }
