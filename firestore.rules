@@ -53,7 +53,7 @@ service cloud.firestore {
         // Un non-admin peut uniquement passer pending → submitted
         // en modifiant exclusivement les champs de saisie autorisés.
         (
-          request.auth.token.admin != true
+          !("admin" in request.auth.token && request.auth.token.admin == true)
           // Transition : pending → submitted uniquement
           && resource.data.status == "pending"
           && request.resource.data.status == "submitted"
