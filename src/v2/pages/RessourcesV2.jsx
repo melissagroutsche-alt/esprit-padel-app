@@ -25,7 +25,8 @@ import { useStockItems, useStockReceipts } from "../hooks/useStockData";
 import { createStockItem, updateStockItem } from "../hooks/useStockWrite";
 import { createReceipt, submitReceipt, validateReceiptTx, rejectReceipt } from "../hooks/useReceiptWrite";
 import { createManualMovement, createTransfer } from "../hooks/useMovementWrite";
-import { useStockMovements } from "../hooks/useStockData";
+import { createInventory, validateInventoryTx, rejectInventory } from "../hooks/useInventoryWrite";
+import { useStockMovements, useStockInventories } from "../hooks/useStockData";
 import { useAuth } from "../../auth/AuthContext";
 import {
   IconFolder, IconSearch, IconPlus, IconX, IconExternalLink,
@@ -1484,21 +1485,6 @@ function ArticleDetail({ item, campagnes, events, isAdmin, appId, allItems, onCl
           </div>
         )}
 
-        {/* Prochaines étapes */}
-        <div className="stk-detail__section-title">Prochaines étapes</div>
-        <div className="stk-upcoming-list">
-          {[
-            { label: "Réceptions fournisseurs", phase: "P4" },
-            { label: "Mouvements & transferts", phase: "P5" },
-            { label: "Inventaires",              phase: "P6" },
-          ].map(s => (
-            <div key={s.label} className="stk-upcoming-item">
-              <span className="stk-upcoming-item__dot" />
-              <span className="stk-upcoming-item__label">{s.label}</span>
-              <span className="stk-upcoming-item__phase">{s.phase}</span>
-            </div>
-          ))}
-        </div>
       </div>
     </div>
   );
@@ -2560,13 +2546,378 @@ function MovementsView({ items, clubs, campagnes, events, appId, isAdmin }) {
   );
 }
 
+/* ─────────────────────────────────────
+   P6 — INVENTAIRES
+───────────────────────────────────── */
+
+const INV_STATUS_LABEL = { pending: "En attente", validated: "Validé", rejected: "Rejeté" };
+
+function InventoryStatusBadge({ status }) {
+  const mod = { pending: "pending", validated: "validated", rejected: "rejected" }[status] || "pending";
+  return <span className={`rcpt-badge rcpt-badge--${mod}`}>{INV_STATUS_LABEL[status] || status}</span>;
+}
+
+function InventoryFormPanel({ items, clubs, appId, onClose, onSaved }) {
+  const [itemId,     setItemId]     = useState("");
+  const [variantId,  setVariantId]  = useState("");
+  const [clubId,     setClubId]     = useState("");
+  const [countedQty, setCountedQty] = useState("");
+  const [note,       setNote]       = useState("");
+  const [saving,     setSaving]     = useState(false);
+  const [err,        setErr]        = useState("");
+
+  const selectedItem    = items.find(i => i.id === itemId) || null;
+  const activeVariants  = selectedItem?.variants?.filter(v => v.active !== false) || [];
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setErr("");
+    setSaving(true);
+    try {
+      await createInventory({ itemId, variantId, clubId, countedQty: Number(countedQty), note }, appId);
+      onSaved();
+      onClose();
+    } catch (e2) {
+      setErr(e2.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="stk-panel stk-panel--form">
+      <div className="stk-panel__head">
+        <span className="stk-panel__title">Nouvel inventaire</span>
+        <button className="stk-panel__close" onClick={onClose}><IconX size={16} /></button>
+      </div>
+      <form className="stk-panel__body stk-form" onSubmit={handleSubmit}>
+        <div className="stk-field">
+          <label className="stk-label">Article <span className="stk-req">*</span></label>
+          <select className="stk-sel" value={itemId}
+            onChange={e => { setItemId(e.target.value); setVariantId(""); }} required>
+            <option value="">Sélectionner un article…</option>
+            {items.map(i => <option key={i.id} value={i.id}>{i.name} — {i.sku}</option>)}
+          </select>
+        </div>
+
+        {selectedItem && (
+          <div className="stk-field">
+            <label className="stk-label">Variante <span className="stk-req">*</span></label>
+            <select className="stk-sel" value={variantId}
+              onChange={e => setVariantId(e.target.value)} required>
+              <option value="">Sélectionner une variante…</option>
+              {activeVariants.map(v => <option key={v.id} value={v.id}>{v.label || v.id}</option>)}
+            </select>
+          </div>
+        )}
+
+        <div className="stk-field">
+          <label className="stk-label">Club <span className="stk-req">*</span></label>
+          <select className="stk-sel" value={clubId}
+            onChange={e => setClubId(e.target.value)} required>
+            <option value="">Sélectionner un club…</option>
+            {clubs.map(c => <option key={c.id} value={String(c.id)}>{c.name || c.id}</option>)}
+          </select>
+        </div>
+
+        <div className="stk-field">
+          <label className="stk-label">Quantité comptée <span className="stk-req">*</span></label>
+          <input className="stk-input" type="number" min="0" step="1"
+            placeholder="0" value={countedQty}
+            onChange={e => setCountedQty(e.target.value)} required />
+        </div>
+
+        <div className="stk-field">
+          <label className="stk-label">Note (optionnel)</label>
+          <input className="stk-input" type="text"
+            placeholder="Remarques sur le comptage…"
+            value={note} onChange={e => setNote(e.target.value)} />
+        </div>
+
+        {err && <div className="stk-form-err">{err}</div>}
+
+        <div className="stk-form-actions">
+          <button type="button" className="camp-btn camp-btn--secondary"
+            onClick={onClose} disabled={saving}>Annuler</button>
+          <button type="submit" className="camp-btn" disabled={saving}>
+            {saving ? "Enregistrement…" : "Soumettre l'inventaire"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function InventoryDetailPanel({ inventory, items, clubs, appId, isAdmin, onClose, onUpdated }) {
+  const item    = items.find(i => i.id === inventory.itemId) || null;
+  const variant = item?.variants?.find(v => v.id === inventory.variantId) || null;
+  const club    = clubs.find(c => String(c.id) === String(inventory.clubId)) || null;
+
+  const [rejectNote,     setRejectNote]     = useState("");
+  const [showRejectForm, setShowRejectForm] = useState(false);
+  const [saving,         setSaving]         = useState(false);
+  const [err,            setErr]            = useState("");
+
+  async function handleValidate() {
+    setErr(""); setSaving(true);
+    try {
+      await validateInventoryTx(inventory.id, appId);
+      onUpdated(); onClose();
+    } catch (e) { setErr(e.message); }
+    finally { setSaving(false); }
+  }
+
+  async function handleReject() {
+    setErr(""); setSaving(true);
+    try {
+      await rejectInventory(inventory.id, rejectNote, appId);
+      onUpdated(); onClose();
+    } catch (e) { setErr(e.message); }
+    finally { setSaving(false); }
+  }
+
+  const canAct    = inventory.status === "pending" && isAdmin;
+  const isReadOnly = inventory.status !== "pending";
+
+  const vLabel = variant
+    ? (variant.label || [variant.dimensions?.taille, variant.dimensions?.couleur].filter(Boolean).join(" · ") || variant.id)
+    : inventory.variantId;
+
+  return (
+    <div className="stk-panel inv-panel-detail">
+      <div className="stk-panel__head">
+        <span className="stk-panel__title">Inventaire</span>
+        <button className="stk-panel__close" onClick={onClose}><IconX size={16} /></button>
+      </div>
+
+      <div className="stk-panel__body">
+        <div className="rcpt-detail__article">
+          {item
+            ? <><span className="rcpt-detail__item-name">{item.name}</span><span className="rcpt-detail__sku">{item.sku}</span></>
+            : <span className="rcpt-card__missing">Article introuvable</span>}
+          <div className="rcpt-detail__variant">{vLabel}</div>
+          <div className="rcpt-detail__club">{club ? club.name : inventory.clubId}</div>
+        </div>
+
+        <InventoryStatusBadge status={inventory.status} />
+
+        <div className="stk-panel__section" style={{ marginTop: 16 }}>Résultat du comptage</div>
+        <div className="rcpt-qty-grid">
+          <div className="rcpt-qty-cell">
+            <div className="rcpt-qty-cell__label">Quantité comptée</div>
+            <div className="rcpt-qty-cell__val">{inventory.countedQty}</div>
+          </div>
+        </div>
+
+        {inventory.note && (
+          <>
+            <div className="stk-panel__section">Note</div>
+            <p className="rcpt-detail__note">{inventory.note}</p>
+          </>
+        )}
+
+        {showRejectForm && (
+          <>
+            <div className="stk-panel__section">Motif du rejet *</div>
+            <textarea className="camp-form-input rcpt-note-input" rows={3}
+              placeholder="Motif du rejet…"
+              value={rejectNote} onChange={e => setRejectNote(e.target.value)} />
+          </>
+        )}
+
+        {inventory.rejectNote && inventory.status === "rejected" && (
+          <>
+            <div className="stk-panel__section">Motif du rejet</div>
+            <p className="rcpt-detail__note rcpt-detail__note--reject">{inventory.rejectNote}</p>
+          </>
+        )}
+
+        <div className="stk-panel__section" style={{ marginTop: 16 }}>Historique</div>
+        <div className="rcpt-timeline">
+          <div className="rcpt-timeline__row">
+            <span className="rcpt-timeline__dot rcpt-timeline__dot--done" />
+            <span className="rcpt-timeline__label">Créé</span>
+            <span className="rcpt-timeline__date">{fmtDate(inventory.createdAt)}</span>
+          </div>
+          {inventory.validatedAt && (
+            <div className="rcpt-timeline__row">
+              <span className="rcpt-timeline__dot rcpt-timeline__dot--validated" />
+              <span className="rcpt-timeline__label">Validé</span>
+              <span className="rcpt-timeline__date">{fmtDate(inventory.validatedAt)}</span>
+            </div>
+          )}
+          {inventory.rejectedAt && (
+            <div className="rcpt-timeline__row">
+              <span className="rcpt-timeline__dot rcpt-timeline__dot--rejected" />
+              <span className="rcpt-timeline__label">Rejeté</span>
+              <span className="rcpt-timeline__date">{fmtDate(inventory.rejectedAt)}</span>
+            </div>
+          )}
+        </div>
+
+        {err && <div className="camp-form-error" style={{ marginTop: 8 }}>{err}</div>}
+      </div>
+
+      <div className="stk-panel__footer">
+        {canAct && !showRejectForm && (
+          <>
+            <button className="camp-btn camp-btn--ghost rcpt-btn-reject"
+              disabled={saving} onClick={() => setShowRejectForm(true)}>Rejeter</button>
+            <button className="camp-btn stk-add-btn" disabled={saving} onClick={handleValidate}>
+              {saving ? <span className="v2-spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> : <><IconCheckSquare size={14} /> Valider</>}
+            </button>
+          </>
+        )}
+        {canAct && showRejectForm && (
+          <>
+            <button className="camp-btn camp-btn--ghost" disabled={saving} onClick={() => setShowRejectForm(false)}>Annuler</button>
+            <button className="camp-btn camp-btn--danger"
+              disabled={!rejectNote.trim() || saving} onClick={handleReject}>
+              {saving ? <span className="v2-spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /> : "Confirmer le rejet"}
+            </button>
+          </>
+        )}
+        {(isReadOnly || (inventory.status === "pending" && !isAdmin)) && (
+          <button className="camp-btn camp-btn--ghost" onClick={onClose}>Fermer</button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function InventoriesView({ items, clubs, campagnes, events, appId, isAdmin }) {
+  const [filterItem,   setFilterItem]   = useState("");
+  const [filterClub,   setFilterClub]   = useState("");
+  const [filterStatus, setFilterStatus] = useState("");
+  const [showForm,     setShowForm]     = useState(false);
+  const [selectedId,   setSelectedId]   = useState(null);
+  const [refreshKey,   setRefreshKey]   = useState(0);
+
+  const invFilters = useMemo(() => {
+    const f = {};
+    if (filterClub) f.clubId = filterClub;
+    return f;
+  }, [filterClub, refreshKey]);
+
+  const { inventories, loading, error } = useStockInventories(invFilters);
+
+  const displayed = useMemo(() => {
+    let list = inventories;
+    if (filterItem)   list = list.filter(inv => inv.itemId === filterItem);
+    if (filterStatus) list = list.filter(inv => inv.status === filterStatus);
+    return list;
+  }, [inventories, filterItem, filterStatus]);
+
+  const selectedInventory = useMemo(
+    () => inventories.find(inv => inv.id === selectedId) || null,
+    [inventories, selectedId, refreshKey]
+  );
+
+  function itemName(id) {
+    return items.find(i => i.id === id)?.name || id;
+  }
+  function clubName(id) {
+    return clubs.find(c => String(c.id) === String(id))?.name || id;
+  }
+
+  return (
+    <div className="stk-content">
+      <div className="stk-list-col">
+        <div className="rcpt-list-header">
+          <div className="stk-mov-filters">
+            <select className="stk-filter-sel" value={filterItem}
+              onChange={e => setFilterItem(e.target.value)}>
+              <option value="">Tous les articles</option>
+              {items.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
+            </select>
+            <select className="stk-filter-sel" value={filterClub}
+              onChange={e => setFilterClub(e.target.value)}>
+              <option value="">Tous les clubs</option>
+              {clubs.map(c => <option key={c.id} value={String(c.id)}>{c.name || c.id}</option>)}
+            </select>
+            <select className="stk-filter-sel" value={filterStatus}
+              onChange={e => setFilterStatus(e.target.value)}>
+              <option value="">Tous les statuts</option>
+              <option value="pending">En attente</option>
+              <option value="validated">Validé</option>
+              <option value="rejected">Rejeté</option>
+            </select>
+          </div>
+          <button className="camp-btn stk-add-btn"
+            onClick={() => { setShowForm(true); setSelectedId(null); }}>
+            <IconPlus size={14} /> Nouvel inventaire
+          </button>
+        </div>
+
+        {loading ? (
+          <div className="stk-loading"><div className="v2-spinner" /></div>
+        ) : error ? (
+          <div className="stk-error">Erreur : {error.message}</div>
+        ) : displayed.length === 0 ? (
+          <div className="stk-empty">
+            <div className="stk-empty__icon"><IconCheckSquare size={22} /></div>
+            <span className="stk-empty__title">Aucun inventaire</span>
+            <span className="stk-empty__sub">
+              {filterItem || filterClub || filterStatus
+                ? "Aucun inventaire ne correspond à ces filtres."
+                : "Soumettez un premier inventaire pour ajuster les niveaux de stock."}
+            </span>
+          </div>
+        ) : (
+          <div className="rcpt-list">
+            {displayed.map(inv => (
+              <button key={inv.id}
+                className={`rcpt-card${selectedId === inv.id ? " rcpt-card--selected" : ""}`}
+                onClick={() => { setSelectedId(inv.id); setShowForm(false); }}>
+                <div className="rcpt-card__top">
+                  <div className="rcpt-card__name">
+                    {itemName(inv.itemId)}
+                  </div>
+                  <InventoryStatusBadge status={inv.status} />
+                </div>
+                <div className="rcpt-card__meta">
+                  <span className="rcpt-card__club">{clubName(inv.clubId)}</span>
+                  <span className="rcpt-card__qty">Compté : <strong>{inv.countedQty}</strong></span>
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {showForm && (
+        <InventoryFormPanel
+          items={items}
+          clubs={clubs}
+          appId={appId}
+          onClose={() => setShowForm(false)}
+          onSaved={() => { setRefreshKey(k => k + 1); setShowForm(false); }}
+        />
+      )}
+
+      {selectedInventory && !showForm && (
+        <InventoryDetailPanel
+          key={selectedInventory.id + refreshKey}
+          inventory={selectedInventory}
+          items={items}
+          clubs={clubs}
+          appId={appId}
+          isAdmin={isAdmin}
+          onClose={() => setSelectedId(null)}
+          onUpdated={() => setRefreshKey(k => k + 1)}
+        />
+      )}
+    </div>
+  );
+}
+
 function StocksView({ currentUser, appId, campagnes, events, clubs, onBack }) {
   const isAdmin = currentUser?.admin === true;
   const { firebaseUser } = useAuth();
   const authUid = firebaseUser?.uid || null;
   const { items, loading, error } = useStockItems();
 
-  const [stockView,    setStockView]   = useState("articles"); // "articles" | "receipts" | "movements"
+  const [stockView,    setStockView]   = useState("articles"); // "articles" | "receipts" | "movements" | "inventories"
   const [search,       setSearch]      = useState("");
   const [filterCamp,   setFilterCamp]  = useState("");
   const [filterEvent,  setFilterEvent] = useState("");
@@ -2649,6 +3000,10 @@ function StocksView({ currentUser, appId, campagnes, events, clubs, onBack }) {
           onClick={() => setStockView("movements")}>
           <IconBarChart size={13} /> Mouvements
         </button>
+        <button className={`stk-tab${stockView === "inventories" ? " stk-tab--active" : ""}`}
+          onClick={() => setStockView("inventories")}>
+          <IconCheckSquare size={13} /> Inventaires
+        </button>
       </div>
 
       {/* ── KPI ── */}
@@ -2687,6 +3042,17 @@ function StocksView({ currentUser, appId, campagnes, events, clubs, onBack }) {
 
       {stockView === "movements" && (
         <MovementsView
+          items={items}
+          clubs={clubs}
+          campagnes={campagnes}
+          events={events}
+          appId={appId}
+          isAdmin={isAdmin}
+        />
+      )}
+
+      {stockView === "inventories" && (
+        <InventoriesView
           items={items}
           clubs={clubs}
           campagnes={campagnes}
@@ -2760,23 +3126,6 @@ function StocksView({ currentUser, appId, campagnes, events, clubs, onBack }) {
             </div>
           )}
 
-          {/* Prochaine étape P6 */}
-          {!loading && (
-            <div className="stk-upcoming-row">
-              {[
-                { label: "Inventaires", desc: "Comptage et ajustement des niveaux réels.", phase: "P6", mod: "p6" },
-              ].map(s => (
-                <div key={s.label} className={`stk-upcoming-card stk-upcoming-card--${s.mod}`}>
-                  <div className="stk-upcoming-card__top">
-                    <span className="stk-upcoming-card__label">{s.label}</span>
-                    <span className="stk-upcoming-card__badge">À venir</span>
-                  </div>
-                  <p className="stk-upcoming-card__desc">{s.desc}</p>
-                  <span className="stk-upcoming-card__phase">{s.phase}</span>
-                </div>
-              ))}
-            </div>
-          )}
         </div>
 
         {/* Panneau détail article */}

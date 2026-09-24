@@ -82,21 +82,12 @@ service cloud.firestore {
     match /stockInventories/{doc} {
       // Lecture : tous les utilisateurs authentifiés.
       allow read: if request.auth != null;
-      // Création / soumission : équipe authentifiée.
-      // Validation / rejet : l'application impose ce contrôle au niveau UI
-      // (champ status modifiable par admin uniquement).
-      // ⚠️  Limitation connue : les règles ne distinguent pas encore une
-      //     mise à jour de 'status' (admin requis) d'une mise à jour ordinaire
-      //     (équipe). Pour l'imposer strictement, utiliser :
-      //       allow update: if request.auth != null
-      //                     && (
-      //                       !("status" in request.resource.data.diff(resource.data).affectedKeys())
-      //                       || request.auth.token.admin == true
-      //                     );
-      //     Nécessite Firebase Rules v2 et des tests. Planifié pour P6.
-      allow create, update: if request.auth != null;
-      allow delete: if request.auth != null
-                    && request.auth.token.admin == true;
+      // Création : tout utilisateur authentifié (équipe + admin).
+      allow create: if request.auth != null;
+      // Mise à jour / suppression : admin uniquement (validation, rejet).
+      allow update, delete: if request.auth != null
+                            && "admin" in request.auth.token
+                            && request.auth.token.admin == true;
     }
 
     // ════════════════════════════════════════════════════════════════════════
