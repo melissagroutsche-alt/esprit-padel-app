@@ -3823,6 +3823,48 @@
 .v2-app .rcpt-timeline__label { flex: 1; color: var(--text-2); font-weight: 500; }
 .v2-app .rcpt-timeline__date  { color: var(--text-3); font-variant-numeric: tabular-nums; }
 
+/* ── P5 — Mouvements manuels ─────────────────────────────────────────── */
+
+/* Panel formulaire */
+.v2-app .stk-panel--form { position: fixed; top: 0; right: 0; bottom: 0; width: 480px; background: var(--surface); border-left: 1px solid var(--border); z-index: 300; display: flex; flex-direction: column; box-shadow: -4px 0 20px rgba(0,0,0,0.10); }
+.v2-app .stk-panel__header { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.v2-app .stk-panel__title { font-size: 15px; font-weight: 700; color: var(--text-1); margin: 0; }
+.v2-app .stk-panel__close { background: none; border: none; cursor: pointer; color: var(--text-2); display: flex; align-items: center; padding: 4px; border-radius: 5px; }
+.v2-app .stk-panel__close:hover { background: var(--bg); color: var(--text-1); }
+.v2-app .stk-panel__body { flex: 1; overflow-y: auto; padding: 20px; }
+
+/* Formulaire */
+.v2-app .stk-form { display: flex; flex-direction: column; gap: 16px; }
+.v2-app .stk-field { display: flex; flex-direction: column; gap: 5px; }
+.v2-app .stk-label { font-size: 12px; font-weight: 600; color: var(--text-2); }
+.v2-app .stk-req { color: var(--red, #DC2626); }
+.v2-app .stk-sel, .v2-app .stk-input { width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--bg); color: var(--text-1); font-size: 13px; outline: none; box-sizing: border-box; }
+.v2-app .stk-sel:focus, .v2-app .stk-input:focus { border-color: var(--ep-blue, #2563EB); box-shadow: 0 0 0 2px rgba(37,99,235,0.10); }
+.v2-app .stk-radio-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.v2-app .stk-radio-btn { padding: 6px 12px; border-radius: 20px; border: 1px solid var(--border); background: var(--bg); color: var(--text-2); font-size: 12px; font-weight: 500; cursor: pointer; user-select: none; transition: background 0.1s, color 0.1s, border-color 0.1s; }
+.v2-app .stk-radio-btn--on { background: var(--ep-dark, #2D2D30); color: #fff; border-color: var(--ep-dark, #2D2D30); }
+.v2-app .stk-form-err { background: #FEF2F2; border: 1px solid #FECACA; color: #DC2626; font-size: 12px; padding: 9px 12px; border-radius: 7px; }
+.v2-app .stk-form-actions { display: flex; gap: 8px; justify-content: flex-end; padding-top: 4px; }
+
+/* Vue liste mouvements */
+.v2-app .stk-mov-view { display: flex; flex-direction: column; gap: 14px; }
+.v2-app .stk-mov-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.v2-app .stk-mov-filters { display: flex; gap: 8px; flex: 1; flex-wrap: wrap; }
+.v2-app .stk-mov-list { display: flex; flex-direction: column; gap: 6px; }
+.v2-app .stk-mov-row { display: flex; align-items: flex-start; gap: 12px; padding: 12px 14px; border-radius: 9px; border: 1px solid var(--border); background: var(--surface); }
+.v2-app .stk-mov-row__dir { flex-shrink: 0; padding-top: 2px; }
+.v2-app .stk-mov-badge { display: inline-block; min-width: 44px; text-align: center; font-size: 13px; font-weight: 700; padding: 2px 8px; border-radius: 5px; }
+.v2-app .stk-mov-badge--in  { background: #ECFDF5; color: #059669; }
+.v2-app .stk-mov-badge--out { background: #FEF2F2; color: #DC2626; }
+.v2-app .stk-mov-row__info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.v2-app .stk-mov-row__article { font-size: 13px; font-weight: 600; color: var(--text-1); }
+.v2-app .stk-mov-row__variant { font-weight: 400; color: var(--text-2); }
+.v2-app .stk-mov-row__meta { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; font-size: 12px; color: var(--text-2); }
+.v2-app .stk-mov-type { font-weight: 600; color: var(--text-1); }
+.v2-app .stk-mov-sep { color: var(--text-3); }
+.v2-app .stk-mov-reason { font-style: italic; color: var(--text-3); max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v2-app .stk-mov-row__date { flex-shrink: 0; font-size: 11px; color: var(--text-3); white-space: nowrap; padding-top: 2px; }
+
 /* ── Responsive ──────────────────────────────────────────────────────── */
 @media (max-width: 900px) {
   .v2-app .rcpt-qty-grid { grid-template-columns: 1fr 1fr 1fr; }
@@ -3830,4 +3872,6 @@
 @media (max-width: 600px) {
   .v2-app .stk-tabs { flex-wrap: wrap; }
   .v2-app .rcpt-qty-grid { grid-template-columns: 1fr 1fr; }
+  .v2-app .stk-panel--form { width: 100vw; }
+  .v2-app .stk-mov-toolbar { flex-direction: column; align-items: stretch; }
 }

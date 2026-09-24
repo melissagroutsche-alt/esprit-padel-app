@@ -24,6 +24,8 @@ import {
 import { useStockItems, useStockReceipts } from "../hooks/useStockData";
 import { createStockItem, updateStockItem } from "../hooks/useStockWrite";
 import { createReceipt, submitReceipt, validateReceiptTx, rejectReceipt } from "../hooks/useReceiptWrite";
+import { createManualMovement, createTransfer } from "../hooks/useMovementWrite";
+import { useStockMovements } from "../hooks/useStockData";
 import { useAuth } from "../../auth/AuthContext";
 import {
   IconFolder, IconSearch, IconPlus, IconX, IconExternalLink,
@@ -2226,13 +2228,345 @@ function ReceiptsView({ currentUser, appId, authUid, items, clubs, campagnes, ev
 /* ─────────────────────────────────────
    STOCKS VIEW (page principale)
 ───────────────────────────────────── */
+/* ─────────────────────────────────────
+   P5 — MOUVEMENTS MANUELS
+───────────────────────────────────── */
+
+const MOV_TYPE_LABELS = {
+  manual_in:    "Entrée manuelle",
+  manual_out:   "Sortie manuelle",
+  transfer_out: "Transfert (départ)",
+  transfer_in:  "Transfert (arrivée)",
+  reception:    "Réception",
+};
+
+const MOV_DIRECTION_COLOR = {
+  in:  "stk-mov--in",
+  out: "stk-mov--out",
+};
+
+/**
+ * Formulaire de saisie d'un mouvement manuel (sortie, entrée, transfert).
+ * Admin uniquement.
+ */
+function MovementFormPanel({ items, clubs, campagnes, events, appId, onClose, onSaved }) {
+  const [movType,     setMovType]     = useState("manual_out");
+  const [itemId,      setItemId]      = useState("");
+  const [variantId,   setVariantId]   = useState("");
+  const [clubFromId,  setClubFromId]  = useState("");
+  const [clubToId,    setClubToId]    = useState("");
+  const [qty,         setQty]         = useState("");
+  const [reason,      setReason]      = useState("");
+  const [saving,      setSaving]      = useState(false);
+  const [err,         setErr]         = useState("");
+
+  const isTransfer = movType === "transfer";
+  const typeLabel  = isTransfer ? "Transfert inter-clubs"
+    : movType === "manual_out" ? "Sortie manuelle" : "Entrée manuelle";
+
+  const selectedItem = items.find(i => i.id === itemId) || null;
+  const activeVariants = selectedItem?.variants?.filter(v => v.active !== false) || [];
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setErr("");
+    setSaving(true);
+    try {
+      if (isTransfer) {
+        await createTransfer({
+          itemId, variantId,
+          clubFromId, clubToId,
+          qty: Number(qty),
+          reason,
+        }, appId);
+      } else {
+        await createManualMovement({
+          type: movType,
+          itemId, variantId,
+          clubId: clubFromId,
+          qty: Number(qty),
+          reason,
+        }, appId);
+      }
+      onSaved();
+      onClose();
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="stk-panel stk-panel--form">
+      <div className="stk-panel__header">
+        <h3 className="stk-panel__title">{typeLabel}</h3>
+        <button className="stk-panel__close" onClick={onClose}><IconX size={15} /></button>
+      </div>
+
+      <div className="stk-panel__body">
+        <form onSubmit={handleSubmit} className="stk-form">
+
+          {/* Type de mouvement */}
+          <div className="stk-field">
+            <label className="stk-label">Type de mouvement</label>
+            <div className="stk-radio-row">
+              {[
+                { v: "manual_out", label: "Sortie" },
+                { v: "manual_in",  label: "Entrée" },
+                { v: "transfer",   label: "Transfert inter-clubs" },
+              ].map(opt => (
+                <label key={opt.v} className={`stk-radio-btn${movType === opt.v ? " stk-radio-btn--on" : ""}`}>
+                  <input type="radio" name="movType" value={opt.v}
+                    checked={movType === opt.v}
+                    onChange={() => { setMovType(opt.v); setClubToId(""); }}
+                    style={{ display: "none" }} />
+                  {opt.label}
+                </label>
+              ))}
+            </div>
+          </div>
+
+          {/* Article */}
+          <div className="stk-field">
+            <label className="stk-label">Article <span className="stk-req">*</span></label>
+            <select className="stk-sel" value={itemId}
+              onChange={e => { setItemId(e.target.value); setVariantId(""); }}
+              required>
+              <option value="">Sélectionner un article…</option>
+              {items.map(i => (
+                <option key={i.id} value={i.id}>{i.name} — {i.sku}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Variante */}
+          {selectedItem && (
+            <div className="stk-field">
+              <label className="stk-label">Variante <span className="stk-req">*</span></label>
+              <select className="stk-sel" value={variantId}
+                onChange={e => setVariantId(e.target.value)}
+                required>
+                <option value="">Sélectionner une variante…</option>
+                {activeVariants.map(v => (
+                  <option key={v.id} value={v.id}>{v.label || v.id}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Club source (ou unique pour entrée/sortie) */}
+          <div className="stk-field">
+            <label className="stk-label">
+              {isTransfer ? "Club source" : "Club"} <span className="stk-req">*</span>
+            </label>
+            <select className="stk-sel" value={clubFromId}
+              onChange={e => setClubFromId(e.target.value)}
+              required>
+              <option value="">Sélectionner un club…</option>
+              {clubs.map(c => (
+                <option key={c.id} value={c.id}>{c.name || c.id}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Club destination (transfert uniquement) */}
+          {isTransfer && (
+            <div className="stk-field">
+              <label className="stk-label">Club destination <span className="stk-req">*</span></label>
+              <select className="stk-sel" value={clubToId}
+                onChange={e => setClubToId(e.target.value)}
+                required>
+                <option value="">Sélectionner un club…</option>
+                {clubs.filter(c => c.id !== clubFromId).map(c => (
+                  <option key={c.id} value={c.id}>{c.name || c.id}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Quantité */}
+          <div className="stk-field">
+            <label className="stk-label">Quantité <span className="stk-req">*</span></label>
+            <input className="stk-input" type="number" min="1" step="1"
+              placeholder="0" value={qty}
+              onChange={e => setQty(e.target.value)}
+              required />
+          </div>
+
+          {/* Motif */}
+          {(movType === "manual_out" || isTransfer) && (
+            <div className="stk-field">
+              <label className="stk-label">Motif <span className="stk-req">*</span></label>
+              <input className="stk-input" type="text"
+                placeholder="Ex. : casse, perte, prêt club partenaire…"
+                value={reason}
+                onChange={e => setReason(e.target.value)}
+                required />
+            </div>
+          )}
+          {movType === "manual_in" && (
+            <div className="stk-field">
+              <label className="stk-label">Motif (optionnel)</label>
+              <input className="stk-input" type="text"
+                placeholder="Ex. : retour de prêt, stock initial…"
+                value={reason}
+                onChange={e => setReason(e.target.value)} />
+            </div>
+          )}
+
+          {err && <div className="stk-form-err">{err}</div>}
+
+          <div className="stk-form-actions">
+            <button type="button" className="camp-btn camp-btn--secondary"
+              onClick={onClose} disabled={saving}>
+              Annuler
+            </button>
+            <button type="submit" className="camp-btn" disabled={saving}>
+              {saving ? "Enregistrement…" : "Valider le mouvement"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Vue liste des mouvements avec filtres article/club/type.
+ */
+function MovementsView({ items, clubs, campagnes, events, appId, isAdmin }) {
+  const [filterItem,  setFilterItem]  = useState("");
+  const [filterClub,  setFilterClub]  = useState("");
+  const [filterType,  setFilterType]  = useState("");
+  const [showForm,    setShowForm]    = useState(false);
+  const [refreshKey,  setRefreshKey]  = useState(0);
+
+  const movFilters = useMemo(() => {
+    const f = {};
+    if (filterItem) f.itemId  = filterItem;
+    if (filterClub) f.clubId  = filterClub;
+    if (filterType) f.type    = filterType;
+    return f;
+  }, [filterItem, filterClub, filterType, refreshKey]);
+
+  const { movements, loading, error } = useStockMovements(movFilters);
+
+  function itemName(id) {
+    const it = items.find(i => i.id === id);
+    return it ? it.name : id;
+  }
+  function variantLabel(itemId, variantId) {
+    const it = items.find(i => i.id === itemId);
+    const v  = it?.variants?.find(v => v.id === variantId);
+    return v?.label || variantId || "—";
+  }
+  function clubName(id) {
+    const c = clubs.find(c => String(c.id) === String(id));
+    return c ? (c.name || c.id) : id;
+  }
+
+  return (
+    <div className="stk-mov-view">
+      {/* Barre d'outils */}
+      <div className="stk-mov-toolbar">
+        <div className="stk-mov-filters">
+          <select className="stk-filter-sel" value={filterItem}
+            onChange={e => setFilterItem(e.target.value)}>
+            <option value="">Tous les articles</option>
+            {items.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
+          </select>
+          <select className="stk-filter-sel" value={filterClub}
+            onChange={e => setFilterClub(e.target.value)}>
+            <option value="">Tous les clubs</option>
+            {clubs.map(c => <option key={c.id} value={String(c.id)}>{c.name || c.id}</option>)}
+          </select>
+          <select className="stk-filter-sel" value={filterType}
+            onChange={e => setFilterType(e.target.value)}>
+            <option value="">Tous les types</option>
+            <option value="manual_in">Entrée manuelle</option>
+            <option value="manual_out">Sortie manuelle</option>
+            <option value="transfer_out">Transfert (départ)</option>
+            <option value="transfer_in">Transfert (arrivée)</option>
+            <option value="reception">Réception</option>
+          </select>
+        </div>
+        {isAdmin && (
+          <button className="camp-btn stk-add-btn"
+            onClick={() => setShowForm(true)}>
+            <IconPlus size={14} /> Nouveau mouvement
+          </button>
+        )}
+      </div>
+
+      {/* Liste */}
+      {loading ? (
+        <div className="stk-loading"><div className="v2-spinner" /></div>
+      ) : error ? (
+        <div className="stk-error">Erreur : {error.message}</div>
+      ) : movements.length === 0 ? (
+        <div className="stk-empty">
+          <div className="stk-empty__icon"><IconBarChart size={22} /></div>
+          <span className="stk-empty__title">Aucun mouvement</span>
+          <span className="stk-empty__sub">
+            {filterItem || filterClub || filterType
+              ? "Aucun mouvement ne correspond à ces filtres."
+              : "Les mouvements de stock apparaîtront ici."}
+          </span>
+        </div>
+      ) : (
+        <div className="stk-mov-list">
+          {movements.map(mov => (
+            <div key={mov.id}
+              className={`stk-mov-row ${MOV_DIRECTION_COLOR[mov.direction] || ""}`}>
+              <div className="stk-mov-row__dir">
+                {mov.direction === "in"
+                  ? <span className="stk-mov-badge stk-mov-badge--in">+{mov.qty}</span>
+                  : <span className="stk-mov-badge stk-mov-badge--out">−{mov.qty}</span>}
+              </div>
+              <div className="stk-mov-row__info">
+                <div className="stk-mov-row__article">
+                  {itemName(mov.itemId)}
+                  <span className="stk-mov-row__variant"> · {variantLabel(mov.itemId, mov.variantId)}</span>
+                </div>
+                <div className="stk-mov-row__meta">
+                  <span className="stk-mov-type">{MOV_TYPE_LABELS[mov.type] || mov.type}</span>
+                  <span className="stk-mov-sep">·</span>
+                  <span>{clubName(mov.clubId)}</span>
+                  {mov.reason && <><span className="stk-mov-sep">·</span><span className="stk-mov-reason">"{mov.reason}"</span></>}
+                </div>
+              </div>
+              <div className="stk-mov-row__date">
+                {mov.at ? fmtDate(mov.at) : "—"}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Formulaire de saisie */}
+      {showForm && isAdmin && (
+        <MovementFormPanel
+          items={items}
+          clubs={clubs}
+          campagnes={campagnes}
+          events={events}
+          appId={appId}
+          onClose={() => setShowForm(false)}
+          onSaved={() => { setRefreshKey(k => k + 1); }}
+        />
+      )}
+    </div>
+  );
+}
+
 function StocksView({ currentUser, appId, campagnes, events, clubs, onBack }) {
   const isAdmin = currentUser?.admin === true;
   const { firebaseUser } = useAuth();
   const authUid = firebaseUser?.uid || null;
   const { items, loading, error } = useStockItems();
 
-  const [stockView,    setStockView]   = useState("articles"); // "articles" | "receipts"
+  const [stockView,    setStockView]   = useState("articles"); // "articles" | "receipts" | "movements"
   const [search,       setSearch]      = useState("");
   const [filterCamp,   setFilterCamp]  = useState("");
   const [filterEvent,  setFilterEvent] = useState("");
@@ -2311,6 +2645,10 @@ function StocksView({ currentUser, appId, campagnes, events, clubs, onBack }) {
           onClick={() => setStockView("receipts")}>
           <IconInbox size={13} /> Réceptions
         </button>
+        <button className={`stk-tab${stockView === "movements" ? " stk-tab--active" : ""}`}
+          onClick={() => setStockView("movements")}>
+          <IconBarChart size={13} /> Mouvements
+        </button>
       </div>
 
       {/* ── KPI ── */}
@@ -2335,7 +2673,7 @@ function StocksView({ currentUser, appId, campagnes, events, clubs, onBack }) {
       </div>
 
       {/* ── Contenu selon onglet ── */}
-      {stockView === "receipts" ? (
+      {stockView === "receipts" && (
         <ReceiptsView
           currentUser={currentUser}
           appId={appId}
@@ -2345,7 +2683,18 @@ function StocksView({ currentUser, appId, campagnes, events, clubs, onBack }) {
           campagnes={campagnes}
           events={events}
         />
-      ) : null}
+      )}
+
+      {stockView === "movements" && (
+        <MovementsView
+          items={items}
+          clubs={clubs}
+          campagnes={campagnes}
+          events={events}
+          appId={appId}
+          isAdmin={isAdmin}
+        />
+      )}
 
       {stockView === "articles" && <div className="stk-content">
         {/* Colonne liste */}
@@ -2411,12 +2760,11 @@ function StocksView({ currentUser, appId, campagnes, events, clubs, onBack }) {
             </div>
           )}
 
-          {/* Prochaines étapes P5-P6 (P4 Réceptions est actif) */}
+          {/* Prochaine étape P6 */}
           {!loading && (
             <div className="stk-upcoming-row">
               {[
-                { label: "Mouvements & transferts", desc: "Déplacements inter-clubs, sorties de stock.", phase: "P5", mod: "p5" },
-                { label: "Inventaires",              desc: "Comptage et ajustement des niveaux réels.",  phase: "P6", mod: "p6" },
+                { label: "Inventaires", desc: "Comptage et ajustement des niveaux réels.", phase: "P6", mod: "p6" },
               ].map(s => (
                 <div key={s.label} className={`stk-upcoming-card stk-upcoming-card--${s.mod}`}>
                   <div className="stk-upcoming-card__top">
