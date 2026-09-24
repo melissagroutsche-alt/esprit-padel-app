@@ -29,7 +29,7 @@ import { useStockMovements } from "../hooks/useStockData";
 import { useAuth } from "../../auth/AuthContext";
 import {
   IconFolder, IconSearch, IconPlus, IconX, IconExternalLink,
-  IconChevronRight, IconSettings, IconLayers, IconInbox, IconCheckSquare,
+  IconChevronRight, IconSettings, IconLayers, IconInbox, IconCheckSquare, IconBarChart,
 } from "../icons";
 
 /* ─────────────────────────────────────
