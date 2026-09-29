@@ -15,13 +15,13 @@
  */
 import React, { useState, useMemo, useCallback } from "react";
 import {
-  useRessources, useCampagnes, useCalendarEvents, useClubs,
+  useRessources, useCampagnes, useCalendarEvents, useClubs, useUsers,
 } from "../hooks/useV1Data";
 import {
   createRessource, updateRessource,
   toggleRessourcePublished, archiveRessource,
 } from "../hooks/useV1Write";
-import { useStockItems, useStockReceipts } from "../hooks/useStockData";
+import { useStockItems, useStockReceipts, useStockLevels } from "../hooks/useStockData";
 import { createStockItem, updateStockItem } from "../hooks/useStockWrite";
 import { createReceipt, submitReceipt, validateReceiptTx, rejectReceipt } from "../hooks/useReceiptWrite";
 import { createManualMovement, createTransfer } from "../hooks/useMovementWrite";
@@ -42,6 +42,26 @@ function fmtDate(d) {
   if (isNaN(dt.getTime())) return null;
   return dt.toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" });
 }
+function resolveUser(rawId, users) {
+  if (!rawId) return null;
+  const sid = String(rawId).trim();
+  if (Array.isArray(users) && users.length) {
+    const u = users.find(x =>
+      String(x.id) === sid || String(x.appId) === sid || String(x.uid) === sid
+    );
+    if (u) {
+      const name =
+        u.name || u.displayName ||
+        [u.prenom, u.nom].filter(Boolean).join(" ") ||
+        [u.firstName, u.lastName].filter(Boolean).join(" ") ||
+        u.email;
+      return name || null;
+    }
+  }
+  if (/^\d{10,}$/.test(sid)) return null;
+  return sid;
+}
+
 function fmtDateShort(d) {
   if (!d) return null;
   const dt = new Date(d);
@@ -1340,7 +1360,7 @@ function VariantForm({ initial, onSave, onCancel }) {
 /* ─────────────────────────────────────
    ARTICLE DETAIL (panneau latéral)
 ───────────────────────────────────── */
-function ArticleDetail({ item, campagnes, events, isAdmin, appId, allItems, onClose, onUpdated, onEdit }) {
+function ArticleDetail({ item, campagnes, events, isAdmin, appId, allItems, onClose, onUpdated, onEdit, onShowHistory }) {
   const [editingVariant,  setEditingVariant]  = useState(null);  // variant obj or {} for new
   const [saving, setSaving] = useState(false);
   const [err,    setErr]    = useState(null);
@@ -1401,6 +1421,11 @@ function ArticleDetail({ item, campagnes, events, isAdmin, appId, allItems, onCl
           <span className="stk-detail__sku">{item.sku}</span>
         </div>
         <div className="stk-detail__head-actions">
+          {onShowHistory && (
+            <button className="camp-btn camp-btn--outline camp-btn--sm" onClick={() => onShowHistory(item)}>
+              Historique
+            </button>
+          )}
           {isAdmin && <button className="camp-btn camp-btn--outline camp-btn--sm" onClick={onEdit}>Modifier</button>}
           <button className="rsrc-detail-panel__close" onClick={onClose}>
             <IconX size={16} />
@@ -2224,12 +2249,137 @@ const MOV_TYPE_LABELS = {
   transfer_out: "Transfert (départ)",
   transfer_in:  "Transfert (arrivée)",
   reception:    "Réception",
+  adjustment:   "Ajustement inventaire",
 };
 
 const MOV_DIRECTION_COLOR = {
   in:  "stk-mov--in",
   out: "stk-mov--out",
 };
+
+/* ─────────────────────────────────────
+   P7 — HISTORIQUE & TRAÇABILITÉ
+───────────────────────────────────── */
+
+function StockHistoryPanel({ item, clubs, users, onClose, onViewReceipt, onViewInventory }) {
+  const [variantId, setVariantId] = useState("");
+  const [clubId,    setClubId]    = useState("");
+
+  const variants = useMemo(
+    () => (item?.variants || []).filter(v => v.active !== false),
+    [item]
+  );
+
+  const movFilters = useMemo(() => {
+    const f = { itemId: item.id };
+    if (variantId) f.variantId = variantId;
+    if (clubId)    f.clubId    = clubId;
+    return f;
+  }, [item.id, variantId, clubId]);
+
+  const { movements, loading: movLoading } = useStockMovements(movFilters);
+  const { levels } = useStockLevels({ itemId: item.id });
+
+  const currentLevel = useMemo(() => {
+    if (!variantId || !clubId) return null;
+    return levels.find(l => l.variantId === variantId && String(l.clubId) === String(clubId)) || null;
+  }, [levels, variantId, clubId]);
+
+  function clubName(id) {
+    const c = clubs.find(c => String(c.id) === String(id));
+    return c ? (c.name || c.id) : id;
+  }
+
+  return (
+    <div className="stk-panel stk-panel--history">
+      <div className="stk-panel__head">
+        <span className="stk-panel__title">Historique — {item.name}</span>
+        <button className="stk-panel__close" onClick={onClose}><IconX size={16} /></button>
+      </div>
+      <div className="stk-panel__body">
+        <div className="stk-history-notice">
+          L'historique couvre les mouvements enregistrés depuis la mise en service de la gestion de stock V2.
+          Des ajustements antérieurs peuvent ne pas y figurer.
+        </div>
+
+        <div className="stk-history-selectors">
+          <select className="stk-filter-sel" value={variantId} onChange={e => setVariantId(e.target.value)}>
+            <option value="">Toutes les variantes</option>
+            {variants.map(v => <option key={v.id} value={v.id}>{v.label}</option>)}
+          </select>
+          <select className="stk-filter-sel" value={clubId} onChange={e => setClubId(e.target.value)}>
+            <option value="">Tous les clubs</option>
+            {clubs.map(c => <option key={c.id} value={String(c.id)}>{c.name || c.id}</option>)}
+          </select>
+        </div>
+
+        {variantId && clubId && (
+          <div className="stk-history-level">
+            Niveau actuel :&nbsp;
+            <strong>
+              {currentLevel !== null
+                ? `${currentLevel.quantity} unité${currentLevel.quantity !== 1 ? "s" : ""}`
+                : "0 unité"}
+            </strong>
+            <span className="stk-history-level__src">(source : stockLevels)</span>
+          </div>
+        )}
+
+        {movLoading ? (
+          <div className="stk-loading"><div className="v2-spinner" /></div>
+        ) : movements.length === 0 ? (
+          <div className="stk-empty">
+            <span className="stk-empty__title">Aucun mouvement</span>
+            <span className="stk-empty__sub">
+              {variantId || clubId
+                ? "Aucun mouvement pour ces filtres."
+                : "Sélectionnez une variante et un club pour affiner l'historique."}
+            </span>
+          </div>
+        ) : (
+          <div className="stk-mov-list">
+            {movements.map(mov => (
+              <div key={mov.id} className={`stk-mov-row ${MOV_DIRECTION_COLOR[mov.direction] || ""}`}>
+                <div className="stk-mov-row__dir">
+                  {mov.direction === "in"
+                    ? <span className="stk-mov-badge stk-mov-badge--in">+{mov.qty}</span>
+                    : <span className="stk-mov-badge stk-mov-badge--out">−{mov.qty}</span>}
+                </div>
+                <div className="stk-mov-row__info">
+                  <div className="stk-mov-row__meta">
+                    <span className="stk-mov-type">{MOV_TYPE_LABELS[mov.type] || mov.type}</span>
+                    <span className="stk-mov-sep">·</span>
+                    <span>{clubName(mov.clubId)}</span>
+                    {mov.reason && <><span className="stk-mov-sep">·</span><span className="stk-mov-reason">"{mov.reason}"</span></>}
+                  </div>
+                  <div className="stk-mov-row__source">
+                    {mov.receiptId && (
+                      <button className="stk-src-badge" onClick={() => { onViewReceipt(mov.receiptId); onClose(); }}>
+                        → Voir réception
+                      </button>
+                    )}
+                    {mov.inventoryId && (
+                      <button className="stk-src-badge" onClick={() => { onViewInventory(mov.inventoryId); onClose(); }}>
+                        → Voir inventaire
+                      </button>
+                    )}
+                    {mov.transferId && !mov.receiptId && !mov.inventoryId && (
+                      <span className="stk-src-badge stk-src-badge--passive">Transfert</span>
+                    )}
+                    {resolveUser(mov.by, users) && (
+                      <span className="stk-mov-author">{resolveUser(mov.by, users)}</span>
+                    )}
+                  </div>
+                </div>
+                <div className="stk-mov-row__date">{mov.at ? fmtDate(mov.at) : "—"}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 /**
  * Formulaire de saisie d'un mouvement manuel (sortie, entrée, transfert).
@@ -2421,7 +2571,7 @@ function MovementFormPanel({ items, clubs, campagnes, events, appId, onClose, on
 /**
  * Vue liste des mouvements avec filtres article/club/type.
  */
-function MovementsView({ items, clubs, campagnes, events, appId, isAdmin }) {
+function MovementsView({ items, clubs, campagnes, events, appId, isAdmin, users }) {
   const [filterItem,  setFilterItem]  = useState("");
   const [filterClub,  setFilterClub]  = useState("");
   const [filterType,  setFilterType]  = useState("");
@@ -2475,6 +2625,7 @@ function MovementsView({ items, clubs, campagnes, events, appId, isAdmin }) {
             <option value="transfer_out">Transfert (départ)</option>
             <option value="transfer_in">Transfert (arrivée)</option>
             <option value="reception">Réception</option>
+            <option value="adjustment">Ajustement inventaire</option>
           </select>
         </div>
         {isAdmin && (
@@ -2520,6 +2671,20 @@ function MovementsView({ items, clubs, campagnes, events, appId, isAdmin }) {
                   <span className="stk-mov-sep">·</span>
                   <span>{clubName(mov.clubId)}</span>
                   {mov.reason && <><span className="stk-mov-sep">·</span><span className="stk-mov-reason">"{mov.reason}"</span></>}
+                </div>
+                <div className="stk-mov-row__source">
+                  {mov.receiptId && (
+                    <span className="stk-src-badge stk-src-badge--passive">Réception</span>
+                  )}
+                  {mov.inventoryId && (
+                    <span className="stk-src-badge stk-src-badge--passive">Inventaire</span>
+                  )}
+                  {mov.transferId && !mov.receiptId && !mov.inventoryId && (
+                    <span className="stk-src-badge stk-src-badge--passive">Transfert</span>
+                  )}
+                  {resolveUser(mov.by, users) && (
+                    <span className="stk-mov-author">{resolveUser(mov.by, users)}</span>
+                  )}
                 </div>
               </div>
               <div className="stk-mov-row__date">
@@ -2916,6 +3081,7 @@ function StocksView({ currentUser, appId, campagnes, events, clubs, onBack }) {
   const { firebaseUser } = useAuth();
   const authUid = firebaseUser?.uid || null;
   const { items, loading, error } = useStockItems();
+  const { users } = useUsers();
 
   const [stockView,    setStockView]   = useState("articles"); // "articles" | "receipts" | "movements" | "inventories"
   const [search,       setSearch]      = useState("");
@@ -2926,6 +3092,7 @@ function StocksView({ currentUser, appId, campagnes, events, clubs, onBack }) {
   const [showCreate,   setShowCreate]  = useState(false);
   const [editItem,     setEditItem]    = useState(null);
   const [refreshKey,   setRefreshKey]  = useState(0);
+  const [historyItem,  setHistoryItem] = useState(null);
 
   function handleUpdated() { setRefreshKey(k => k + 1); }
 
@@ -3048,6 +3215,7 @@ function StocksView({ currentUser, appId, campagnes, events, clubs, onBack }) {
           events={events}
           appId={appId}
           isAdmin={isAdmin}
+          users={users}
         />
       )}
 
@@ -3140,6 +3308,7 @@ function StocksView({ currentUser, appId, campagnes, events, clubs, onBack }) {
             onClose={() => setSelectedId(null)}
             onUpdated={handleUpdated}
             onEdit={() => setEditItem(selectedItem)}
+            onShowHistory={item => setHistoryItem(item)}
           />
         )}
 
@@ -3168,6 +3337,18 @@ function StocksView({ currentUser, appId, campagnes, events, clubs, onBack }) {
           appId={appId}
           onClose={() => setShowCreate(false)}
           onSaved={() => { handleUpdated(); setShowCreate(false); }}
+        />
+      )}
+
+      {/* P7 — Panneau historique */}
+      {historyItem && (
+        <StockHistoryPanel
+          item={historyItem}
+          clubs={clubs}
+          users={users}
+          onClose={() => setHistoryItem(null)}
+          onViewReceipt={() => { setStockView("receipts"); setHistoryItem(null); }}
+          onViewInventory={() => { setStockView("inventories"); setHistoryItem(null); }}
         />
       )}
     </div>
