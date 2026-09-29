@@ -4,6 +4,14 @@
       "collectionGroup": "stockMovements",
       "queryScope": "COLLECTION",
       "fields": [
+        { "fieldPath": "itemId", "order": "ASCENDING" },
+        { "fieldPath": "at",     "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "stockMovements",
+      "queryScope": "COLLECTION",
+      "fields": [
         { "fieldPath": "itemId",    "order": "ASCENDING" },
         { "fieldPath": "variantId", "order": "ASCENDING" },
         { "fieldPath": "clubId",    "order": "ASCENDING" },

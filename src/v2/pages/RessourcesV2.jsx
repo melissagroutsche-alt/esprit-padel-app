@@ -2270,14 +2270,15 @@ function StockHistoryPanel({ item, clubs, users, onClose, onViewReceipt, onViewI
     [item]
   );
 
-  const movFilters = useMemo(() => {
-    const f = { itemId: item.id };
-    if (variantId) f.variantId = variantId;
-    if (clubId)    f.clubId    = clubId;
-    return f;
-  }, [item.id, variantId, clubId]);
+  // useStockMovements filtré sur itemId (index itemId+at) ; variantId/clubId côté client
+  const { movements: itemMovements, loading: movLoading } = useStockMovements({ itemId: item.id });
 
-  const { movements, loading: movLoading } = useStockMovements(movFilters);
+  const movements = useMemo(() => {
+    let list = itemMovements;
+    if (variantId) list = list.filter(m => m.variantId === variantId);
+    if (clubId)    list = list.filter(m => String(m.clubId) === String(clubId));
+    return list;
+  }, [itemMovements, variantId, clubId]);
   const { levels } = useStockLevels({ itemId: item.id });
 
   const currentLevel = useMemo(() => {
@@ -2578,15 +2579,21 @@ function MovementsView({ items, clubs, campagnes, events, appId, isAdmin, users 
   const [showForm,    setShowForm]    = useState(false);
   const [refreshKey,  setRefreshKey]  = useState(0);
 
-  const movFilters = useMemo(() => {
-    const f = {};
-    if (filterItem) f.itemId  = filterItem;
-    if (filterClub) f.clubId  = filterClub;
-    if (filterType) f.type    = filterType;
-    return f;
-  }, [filterItem, filterClub, filterType, refreshKey]);
+  // useStockMovements sans filtre : listener stable, filtrage client-side ci-dessous
+  const { movements: allMovements, loading, error } = useStockMovements({});
 
-  const { movements, loading, error } = useStockMovements(movFilters);
+  const movements = useMemo(() => {
+    let list = allMovements;
+    if (filterItem) list = list.filter(m => m.itemId === filterItem);
+    if (filterClub) list = list.filter(m => String(m.clubId) === String(filterClub));
+    if (filterType) list = list.filter(m => m.type === filterType);
+    // tri antichronologique
+    return [...list].sort((a, b) => {
+      const ta = a.at ? new Date(a.at).getTime() : 0;
+      const tb = b.at ? new Date(b.at).getTime() : 0;
+      return tb - ta;
+    });
+  }, [allMovements, filterItem, filterClub, filterType]);
 
   function itemName(id) {
     const it = items.find(i => i.id === id);
