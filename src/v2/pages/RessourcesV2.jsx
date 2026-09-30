@@ -2120,11 +2120,11 @@ function ReceiptDetailPanel({ receipt, items, clubs, appId, authUid, isAdmin, on
 }
 
 /* Vue principale Réceptions */
-function ReceiptsView({ currentUser, appId, authUid, items, clubs, campagnes, events }) {
+function ReceiptsView({ currentUser, appId, authUid, items, clubs, campagnes, events, initialSelectedId }) {
   const isAdmin = currentUser?.admin === true;
   const { receipts, loading, error } = useStockReceipts();
 
-  const [selectedId,   setSelectedId]   = useState(null);
+  const [selectedId,   setSelectedId]   = useState(initialSelectedId || null);
   const [showCreate,   setShowCreate]   = useState(false);
   const [refreshKey,   setRefreshKey]   = useState(0);
 
@@ -2957,12 +2957,12 @@ function InventoryDetailPanel({ inventory, items, clubs, appId, isAdmin, onClose
   );
 }
 
-function InventoriesView({ items, clubs, campagnes, events, appId, isAdmin }) {
+function InventoriesView({ items, clubs, campagnes, events, appId, isAdmin, initialSelectedId }) {
   const [filterItem,   setFilterItem]   = useState("");
   const [filterClub,   setFilterClub]   = useState("");
   const [filterStatus, setFilterStatus] = useState("");
   const [showForm,     setShowForm]     = useState(false);
-  const [selectedId,   setSelectedId]   = useState(null);
+  const [selectedId,   setSelectedId]   = useState(initialSelectedId || null);
   const [refreshKey,   setRefreshKey]   = useState(0);
 
   const invFilters = useMemo(() => {
@@ -3100,6 +3100,8 @@ function StocksView({ currentUser, appId, campagnes, events, clubs, onBack }) {
   const [editItem,     setEditItem]    = useState(null);
   const [refreshKey,   setRefreshKey]  = useState(0);
   const [historyItem,  setHistoryItem] = useState(null);
+  const [jumpReceiptId,  setJumpReceiptId]  = useState(null);
+  const [jumpInventoryId, setJumpInventoryId] = useState(null);
 
   function handleUpdated() { setRefreshKey(k => k + 1); }
 
@@ -3167,7 +3169,7 @@ function StocksView({ currentUser, appId, campagnes, events, clubs, onBack }) {
           <IconLayers size={13} /> Articles
         </button>
         <button className={`stk-tab${stockView === "receipts" ? " stk-tab--active" : ""}`}
-          onClick={() => setStockView("receipts")}>
+          onClick={() => { setJumpReceiptId(null); setStockView("receipts"); }}>
           <IconInbox size={13} /> Réceptions
         </button>
         <button className={`stk-tab${stockView === "movements" ? " stk-tab--active" : ""}`}
@@ -3175,7 +3177,7 @@ function StocksView({ currentUser, appId, campagnes, events, clubs, onBack }) {
           <IconBarChart size={13} /> Mouvements
         </button>
         <button className={`stk-tab${stockView === "inventories" ? " stk-tab--active" : ""}`}
-          onClick={() => setStockView("inventories")}>
+          onClick={() => { setJumpInventoryId(null); setStockView("inventories"); }}>
           <IconCheckSquare size={13} /> Inventaires
         </button>
       </div>
@@ -3204,6 +3206,7 @@ function StocksView({ currentUser, appId, campagnes, events, clubs, onBack }) {
       {/* ── Contenu selon onglet ── */}
       {stockView === "receipts" && (
         <ReceiptsView
+          key={jumpReceiptId || "receipts"}
           currentUser={currentUser}
           appId={appId}
           authUid={authUid}
@@ -3211,6 +3214,7 @@ function StocksView({ currentUser, appId, campagnes, events, clubs, onBack }) {
           clubs={clubs}
           campagnes={campagnes}
           events={events}
+          initialSelectedId={jumpReceiptId}
         />
       )}
 
@@ -3228,12 +3232,14 @@ function StocksView({ currentUser, appId, campagnes, events, clubs, onBack }) {
 
       {stockView === "inventories" && (
         <InventoriesView
+          key={jumpInventoryId || "inventories"}
           items={items}
           clubs={clubs}
           campagnes={campagnes}
           events={events}
           appId={appId}
           isAdmin={isAdmin}
+          initialSelectedId={jumpInventoryId}
         />
       )}
 
@@ -3354,8 +3360,8 @@ function StocksView({ currentUser, appId, campagnes, events, clubs, onBack }) {
           clubs={clubs}
           users={users}
           onClose={() => setHistoryItem(null)}
-          onViewReceipt={() => { setStockView("receipts"); setHistoryItem(null); }}
-          onViewInventory={() => { setStockView("inventories"); setHistoryItem(null); }}
+          onViewReceipt={id => { setJumpReceiptId(id); setStockView("receipts"); setHistoryItem(null); }}
+          onViewInventory={id => { setJumpInventoryId(id); setStockView("inventories"); setHistoryItem(null); }}
         />
       )}
     </div>
