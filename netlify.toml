@@ -4,6 +4,7 @@
 
 [functions]
   directory = "netlify/functions"
+  node_bundler = "nft"
 
 # Branche principale = production
 [context.production]
