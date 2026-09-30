@@ -2005,7 +2005,12 @@ function ReceiptDetailPanel({ receipt, items, clubs, appId, authUid, isAdmin, on
             <div className={`rcpt-qty-cell__val rcpt-qty-cell__val--delta${liveDelta !== null ? (liveDelta > 0 ? " pos" : liveDelta < 0 ? " neg" : " zero") : ""}`}>
               {receipt.status === "pending" && !isAdmin
                 ? (liveDelta !== null ? (liveDelta > 0 ? "+" : "") + liveDelta : "—")
-                : (receipt.delta !== null ? (receipt.delta > 0 ? "+" : "") + receipt.delta : "—")}
+                : (() => {
+                    const d = receipt.delta != null
+                      ? receipt.delta
+                      : (receipt.receivedQty != null ? receipt.receivedQty - receipt.plannedQty : null);
+                    return d !== null ? (d > 0 ? "+" : "") + d : "—";
+                  })()}
             </div>
           </div>
         </div>
@@ -2322,7 +2327,7 @@ function StockHistoryPanel({ item, clubs, users, onClose, onViewReceipt, onViewI
                 ? `${currentLevel.quantity} unité${currentLevel.quantity !== 1 ? "s" : ""}`
                 : "0 unité"}
             </strong>
-            <span className="stk-history-level__src">(source : stockLevels)</span>
+            {" "}<span className="stk-history-level__src">(source : stockLevels)</span>
           </div>
         )}
 

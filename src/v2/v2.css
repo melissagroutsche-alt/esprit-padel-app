@@ -3863,6 +3863,7 @@
 .v2-app .stk-mov-type { font-weight: 600; color: var(--text-1); }
 .v2-app .stk-mov-sep { color: var(--text-3); }
 .v2-app .stk-mov-reason { font-style: italic; color: var(--text-3); max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v2-app .stk-mov-row__source { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin-top: 2px; }
 .v2-app .stk-mov-row__date { flex-shrink: 0; font-size: 11px; color: var(--text-3); white-space: nowrap; padding-top: 2px; }
 
 /* ── Responsive ──────────────────────────────────────────────────────── */
