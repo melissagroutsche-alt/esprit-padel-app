@@ -79,6 +79,17 @@ service cloud.firestore {
                     && request.auth.token.admin == true;
     }
 
+    // ════════════════════════════════════════════════════════════════════════
+    // receptionTokens (P8) — tokens à usage unique pour réceptions sans compte
+    //
+    // Accès client (lecture ET écriture) : INTERDIT.
+    // Toutes les opérations passent exclusivement par le SDK Admin
+    // (Netlify Functions) qui contourne les règles Firestore côté client.
+    // ════════════════════════════════════════════════════════════════════════
+    match /receptionTokens/{tokenId} {
+      allow read, write: if false;
+    }
+
     match /stockInventories/{doc} {
       // Lecture : tous les utilisateurs authentifiés.
       allow read: if request.auth != null;
